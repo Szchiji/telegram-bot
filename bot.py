@@ -35,6 +35,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message_id = int(query.data.split("_")[1])  # 获取消息 ID
     action = query.data.split("_")[0]  # 获取操作（approve 或 reject）
 
+    # 向用户反馈按钮点击
     if action == "approve":
         # 如果审核通过，转发到频道
         await context.bot.forward_message(
@@ -42,10 +43,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             from_chat_id=query.message.chat_id,
             message_id=message_id
         )
-        await query.answer("消息已批准，已转发到频道！")
+        await query.answer("消息已批准，已转发到频道！")  # 向用户回应按钮点击
     elif action == "reject":
         # 如果拒绝，回复用户并不转发消息
-        await query.answer("消息被拒绝，未转发到频道！")
+        await query.answer("消息被拒绝，未转发到频道！")  # 向用户回应按钮点击
 
     # 删除按钮（避免重复点击）
     await query.edit_message_reply_markup(reply_markup=None)
