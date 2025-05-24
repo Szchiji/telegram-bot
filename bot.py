@@ -1,81 +1,34 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ApplicationBuilder, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram import Update
+from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
 
 BOT_TOKEN = '8092070129:AAFuE3WBP6z7YyFpY1uIE__WujCOv6jd-oI'
 CHANNEL_ID = '@sixuexi'  # 频道 ID
-ADMIN_IDS = [7848870377]  # 你的 Telegram 用户 ID
 
-# 创建内联按钮（审核按钮）
-def create_approval_buttons(message_id):
-    keyboard = [
-        [InlineKeyboardButton("通过", callback_data=f"approve_{message_id}")],
-        [InlineKeyboardButton("拒绝", callback_data=f"reject_{message_id}")]
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-# 处理所有用户的消息，转发给管理员审核
-async def send_for_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# 处理用户发送的消息并直接转发到频道
+async def forward_to_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
         message_text = update.message.text  # 获取消息文本
         user_id = update.message.from_user.id  # 获取用户的 ID
         message_id = update.message.message_id  # 获取消息 ID
         chat_id = update.message.chat.id  # 获取聊天 ID（群组或个人）
 
-        # 发送消息到所有审核人员
-        for admin_id in ADMIN_IDS:
-            await context.bot.send_message(
-                chat_id=admin_id,
-                text=f"新消息来自 @{update.message.from_user.username}（ID：{user_id}）\n"
-                     f"消息来自 chat_id: {chat_id}，消息 ID: {message_id}：\n\n{message_text}\n\n是否批准该消息？",
-                reply_markup=create_approval_buttons(message_id)  # 添加按钮
-            )
-        print(f"转发给审核人员：{message_text}")  # 记录消息
-
-# 处理按钮点击事件
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    try:
-        message_id = int(query.data.split("_")[1])  # 获取消息 ID
-        action = query.data.split("_")[0]  # 获取操作（approve 或 reject）
-
-        print(f"处理按钮点击，操作: {action}, 消息 ID: {message_id}")
-
-        # 向用户反馈按钮点击
-        if action == "approve":
-            # 如果审核通过，转发到频道
-            print(f"正在转发消息 ID: {message_id} 到频道：{CHANNEL_ID}")
-
-            # 确保消息能正确转发
+        # 直接转发用户消息到频道
+        try:
             forwarded_message = await context.bot.forward_message(
                 chat_id=CHANNEL_ID,
-                from_chat_id=query.message.chat_id,  # 发送者的聊天 ID
+                from_chat_id=chat_id,  # 发送者的聊天 ID
                 message_id=message_id
             )
-            
-            # 确保转发成功后给用户反馈
-            await query.answer(f"消息已批准，已转发到频道！")
             print(f"消息已转发到频道：{CHANNEL_ID}, 消息ID: {forwarded_message.message_id}")
-        
-        elif action == "reject":
-            # 如果拒绝，回复用户并不转发消息
-            await query.answer("消息被拒绝，未转发到频道！")  # 向用户回应按钮点击
-        
-        # 删除按钮（避免重复点击）
-        await query.edit_message_reply_markup(reply_markup=None)
-
-    except Exception as e:
-        # 捕获异常并打印错误信息
-        print(f"错误：{str(e)}")
-        await query.answer(f"出现错误: {str(e)}，请稍后重试。")
+        except Exception as e:
+            print(f"转发失败：{str(e)}")
+            await update.message.reply_text(f"消息转发失败：{str(e)}")
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # 处理所有消息
-    app.add_handler(MessageHandler(filters.ALL, send_for_approval))  # 所有用户发送的消息都会转发给管理员审核
-
-    # 处理按钮点击
-    app.add_handler(CallbackQueryHandler(button_handler))  # 处理按钮点击
+    # 处理所有消息并直接转发
+    app.add_handler(MessageHandler(filters.ALL, forward_to_channel))  # 所有用户发送的消息都会直接转发到频道
 
     print("Bot is running...")
     app.run_polling()
