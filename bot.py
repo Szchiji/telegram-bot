@@ -36,20 +36,32 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     action = query.data.split("_")[0]  # 获取操作（approve 或 reject）
 
     # 向用户反馈按钮点击
-    if action == "approve":
-        # 如果审核通过，转发到频道
-        await context.bot.forward_message(
-            chat_id=CHANNEL_ID,
-            from_chat_id=query.message.chat_id,
-            message_id=message_id
-        )
-        await query.answer("消息已批准，已转发到频道！")  # 向用户回应按钮点击
-    elif action == "reject":
-        # 如果拒绝，回复用户并不转发消息
-        await query.answer("消息被拒绝，未转发到频道！")  # 向用户回应按钮点击
+    try:
+        if action == "approve":
+            # 如果审核通过，转发到频道
+            print(f"正在转发消息 ID: {message_id} 到频道：{CHANNEL_ID}")
 
-    # 删除按钮（避免重复点击）
-    await query.edit_message_reply_markup(reply_markup=None)
+            # 确保消息能正确转发
+            forwarded_message = await context.bot.forward_message(
+                chat_id=CHANNEL_ID,
+                from_chat_id=query.message.chat_id,
+                message_id=message_id
+            )
+            # 确保转发成功后给用户反馈
+            await query.answer(f"消息已批准，已转发到频道！")
+            print(f"消息已转发到频道：{CHANNEL_ID}, 消息ID: {forwarded_message.message_id}")
+
+        elif action == "reject":
+            # 如果拒绝，回复用户并不转发消息
+            await query.answer("消息被拒绝，未转发到频道！")  # 向用户回应按钮点击
+
+        # 删除按钮（避免重复点击）
+        await query.edit_message_reply_markup(reply_markup=None)
+
+    except Exception as e:
+        # 捕获异常并打印错误信息
+        print(f"错误：{str(e)}")
+        await query.answer("出现错误，请稍后重试。")
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).build()
