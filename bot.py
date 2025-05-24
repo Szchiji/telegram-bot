@@ -1,81 +1,78 @@
 from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 import json
 
 BOT_TOKEN = '8092070129:AAFuE3WBP6z7YyFpY1uIE__WujCOv6jd-oI'
 ADMIN_IDS = [7848870377]  # 管理员的用户 ID
 
-# 存储频道 ID 的文件路径
-CHANNEL_ID_FILE = 'channel_id.json'
+# 存储触发词和自动回复内容的文件路径
+REPLY_FILE = 'trigger_replies.json'
 
 
-# 从文件加载频道 ID
-def load_channel_id():
+# 从文件加载触发词和自动回复内容
+def load_trigger_replies():
     try:
-        with open(CHANNEL_ID_FILE, 'r') as f:
+        with open(REPLY_FILE, 'r') as f:
             data = json.load(f)
-            return data.get('channel_id', None)
+            return data.get('trigger_replies', {})
     except FileNotFoundError:
-        return None
+        return {}
 
 
-# 保存频道 ID 到文件
-def save_channel_id(channel_id):
-    with open(CHANNEL_ID_FILE, 'w') as f:
-        json.dump({'channel_id': channel_id}, f)
+# 保存触发词和自动回复内容到文件
+def save_trigger_replies(trigger_replies):
+    with open(REPLY_FILE, 'w') as f:
+        json.dump({'trigger_replies': trigger_replies}, f)
 
 
-# 处理设置频道命令
-async def set_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# 处理设置触发词和自动回复的命令
+async def set_trigger_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 仅允许管理员使用该命令
     if update.message.from_user.id not in ADMIN_IDS:
         await update.message.reply_text("你没有权限使用此命令。")
         return
 
-    if context.args:
-        new_channel_id = context.args[0]  # 获取频道 ID
-        save_channel_id(new_channel_id)  # 保存新的频道 ID
-        await update.message.reply_text(f"转发的频道已更换为 {new_channel_id}")
-    else:
-        await update.message.reply_text("请提供新的频道 ID，例如：/setchannel @new_channel")
-
-
-# 处理用户发送的消息，转发到当前设置的频道
-async def forward_to_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # 获取当前设置的频道 ID
-    channel_id = load_channel_id()
-    if channel_id is None:
-        await update.message.reply_text("当前未设置转发的频道。请管理员使用 /setchannel 命令设置一个频道。")
+    if len(context.args) < 2:
+        await update.message.reply_text("请提供触发词和回复内容，例如：/settrigger 响应 你好，世界！")
         return
 
-    # 根据消息类型处理转发
-    if update.message.text:
-        await context.bot.send_message(chat_id=channel_id, text=update.message.text)
-        print(f"文本消息已转发到频道：{channel_id}")
+    trigger_word = context.args[0]  # 触发词
+    reply_message = ' '.join(context.args[1:])  # 自动回复内容
 
-    elif update.message.photo:
-        photo = update.message.photo[-1]  # 获取最大分辨率的照片
-        await context.bot.send_photo(chat_id=channel_id, photo=photo.file_id)
-        print(f"照片消息已转发到频道：{channel_id}")
+    # 获取当前设置的触发词和回复内容
+    trigger_replies = load_trigger_replies()
+    
+    # 更新触发词和自动回复内容
+    trigger_replies[trigger_word] = reply_message
+    save_trigger_replies(trigger_replies)
 
-    elif update.message.video:
-        video = update.message.video.file_id  # 获取视频文件 ID
-        await context.bot.send_video(chat_id=channel_id, video=video)
-        print(f"视频消息已转发到频道：{channel_id}")
+    await update.message.reply_text(f"已设置触发词 '{trigger_word}' 的自动回复：\n{reply_message}")
 
-    else:
-        print(f"收到无法处理的消息类型：{type(update.message)}")
+
+# 处理所有用户的消息，匹配触发词并回复
+async def check_trigger_and_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # 获取当前设置的触发词和自动回复内容
+    trigger_replies = load_trigger_replies()
+    
+    # 获取用户发送的消息文本
+    message_text = update.message.text.lower()  # 将消息文本转换为小写以进行不区分大小写的匹配
+    
+    # 检查用户的消息是否包含在触发词列表中
+    for trigger, reply in trigger_replies.items():
+        if trigger.lower() in message_text:  # 如果用户消息中包含触发词
+            await update.message.reply_text(reply)  # 发送自动回复
+            print(f"触发词 '{trigger}' 匹配，已自动回复：{reply}")
+            break  # 匹配到第一个触发词后停止检查
 
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # 添加管理员设置频道的命令
-    app.add_handler(CommandHandler("setchannel", set_channel))
+    # 添加管理员设置触发词和自动回复的命令
+    app.add_handler(CommandHandler("settrigger", set_trigger_reply))
 
-    # 处理所有消息并转发到当前设置的频道
-    app.add_handler(MessageHandler(filters.ALL, forward_to_channel))
+    # 处理所有用户的消息并检查是否匹配触发词
+    app.add_handler(MessageHandler(filters.ALL, check_trigger_and_reply))
 
     print("Bot is running...")
     app.run_polling()
-
