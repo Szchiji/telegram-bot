@@ -19,12 +19,14 @@ async def send_for_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message_text = update.message.text  # 获取消息文本
         user_id = update.message.from_user.id  # 获取用户的 ID
         message_id = update.message.message_id  # 获取消息 ID
+        chat_id = update.message.chat.id  # 获取聊天 ID（群组或个人）
 
         # 发送消息到所有审核人员
         for admin_id in ADMIN_IDS:
             await context.bot.send_message(
                 chat_id=admin_id,
-                text=f"新消息来自 @{update.message.from_user.username}（ID：{user_id}）：\n\n{message_text}\n\n是否批准该消息？",
+                text=f"新消息来自 @{update.message.from_user.username}（ID：{user_id}）\n"
+                     f"消息来自 chat_id: {chat_id}，消息 ID: {message_id}：\n\n{message_text}\n\n是否批准该消息？",
                 reply_markup=create_approval_buttons(message_id)  # 添加按钮
             )
         print(f"转发给审核人员：{message_text}")  # 记录消息
@@ -46,24 +48,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # 确保消息能正确转发
             forwarded_message = await context.bot.forward_message(
                 chat_id=CHANNEL_ID,
-                from_chat_id=query.message.chat_id,
+                from_chat_id=query.message.chat_id,  # 发送者的聊天 ID
                 message_id=message_id
             )
+            
             # 确保转发成功后给用户反馈
             await query.answer(f"消息已批准，已转发到频道！")
             print(f"消息已转发到频道：{CHANNEL_ID}, 消息ID: {forwarded_message.message_id}")
-
+        
         elif action == "reject":
             # 如果拒绝，回复用户并不转发消息
             await query.answer("消息被拒绝，未转发到频道！")  # 向用户回应按钮点击
-
+        
         # 删除按钮（避免重复点击）
         await query.edit_message_reply_markup(reply_markup=None)
 
     except Exception as e:
         # 捕获异常并打印错误信息
         print(f"错误：{str(e)}")
-        await query.answer("出现错误，请稍后重试。")
+        await query.answer(f"出现错误: {str(e)}，请稍后重试。")
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).build()
