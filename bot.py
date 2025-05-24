@@ -32,11 +32,13 @@ async def send_for_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 处理按钮点击事件
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    message_id = int(query.data.split("_")[1])  # 获取消息 ID
-    action = query.data.split("_")[0]  # 获取操作（approve 或 reject）
-
-    # 向用户反馈按钮点击
     try:
+        message_id = int(query.data.split("_")[1])  # 获取消息 ID
+        action = query.data.split("_")[0]  # 获取操作（approve 或 reject）
+
+        print(f"处理按钮点击，操作: {action}, 消息 ID: {message_id}")
+
+        # 向用户反馈按钮点击
         if action == "approve":
             # 如果审核通过，转发到频道
             print(f"正在转发消息 ID: {message_id} 到频道：{CHANNEL_ID}")
