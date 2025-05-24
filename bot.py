@@ -1,10 +1,8 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
 BOT_TOKEN = '8092070129:AAFuE3WBP6z7YyFpY1uIE__WujCOv6jd-oI'
 CHANNEL_ID = '@sixuexi'  # 频道 ID
-
-# 添加多个审核人员的 Telegram 用户 ID
 ADMIN_IDS = [7848870377]  # 你的 Telegram 用户 ID
 
 # 创建内联按钮（审核按钮）
@@ -63,5 +61,4 @@ if __name__ == '__main__':
 
     print("Bot is running...")
     app.run_polling()
-
 
