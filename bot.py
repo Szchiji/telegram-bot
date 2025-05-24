@@ -2,10 +2,10 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 
 BOT_TOKEN = '8092070129:AAFuE3WBP6z7YyFpY1uIE__WujCOv6jd-oI'
-CHANNEL_ID = '@sixuexi'
+CHANNEL_ID = '@sixuexi'  # 频道 ID
 
 # 添加多个审核人员的 Telegram 用户 ID
-ADMIN_IDS = [7848870377, 1234567890]  # 在这里添加更多审核人员的 ID
+ADMIN_IDS = [7848870377]  # 你的 Telegram 用户 ID
 
 # 将消息转发给所有审核人员
 async def send_for_approval(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -40,6 +40,10 @@ async def forward_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 if __name__ == '__main__':
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(MessageHandler(filters.ALL, send_for_approval))  # 先转发给所有审核人员
+
+    # 设置消息处理器，用于审核
+    app.add_handler(MessageHandler(filters.ALL, send_for_approval))  # 所有用户发送的消息都会转发给管理员审核
+
     print("Bot is running...")
     app.run_polling()
+
