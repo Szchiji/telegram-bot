@@ -1,158 +1,244 @@
-import json
 import os
+import json
+import asyncio
 from fastapi import FastAPI, Request
-import uvicorn
-import telegram
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters,
+)
 
-TOKEN = "8092070129:AAGxrcDxMFniPLjNnZ4eNYd-Mtq9JBra-60"
-CHANNEL_ID = "-1001763041158"
+# Telegram 配置
+CHANNEL_ID = -1001763041158
 ADMIN_ID = 7848870377
-WEBHOOK_URL = "https://telegram-bot-p5yt.onrender.com"
-VIP_FILE = "vip_users.json"
+DATA_FILE = "vip_data.json"
 
-enable_vip_mode = True
-
-def load_vip_users():
-    if os.path.exists(VIP_FILE):
-        with open(VIP_FILE, 'r') as f:
+# 读取/保存会员数据
+def load_data():
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return []
+    except:
+        return {"vip_users": [], "vip_enabled": True}
 
-def save_vip_users(users):
-    with open(VIP_FILE, 'w') as f:
-        json.dump(users, f)
+def save_data(data):
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-vip_users = load_vip_users()
+data = load_data()
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-app = FastAPI()
-bot = telegram.Bot(token=TOKEN)
-application = Application.builder().token(TOKEN).build()
+# 权限与会员判断
+def is_admin(user_id): return user_id == ADMIN_ID
+def is_vip(user_id): return user_id in data.get("vip_users", [])
 
-@app.post("/")
-async def webhook(request: Request):
-    data = await request.json()
-    update = Update.de_json(data, bot)
-    await application.update_queue.put(update)
-    return "ok"
+# 自动删除消息
+async def auto_delete_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, delay: int = 60):
+    await asyncio.sleep(delay)
+    try:
+        await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except: pass
 
-async def start(update: Update, context: CallbackContext):
-    await update.message.reply_text("欢迎使用匿名投稿机器人！发送消息开始投稿。")
-
-async def help_command(update: Update, context: CallbackContext):
-    await update.message.reply_text("发送你想要匿名投稿的内容，我们会审核后发布到频道。")
-
-async def handle_message(update: Update, context: CallbackContext):
-    user_id = update.message.from_user.id
-    message = update.message
-    if enable_vip_mode and user_id in vip_users:
-        await context.bot.send_message(chat_id=CHANNEL_ID, text=f"匿名投稿：\n{message.text}")
-        await message.reply_text("✅ 投稿成功，已直接发布。")
+# 指令：/start
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    text = "欢迎使用投稿机器人！\n\n"
+    if is_admin(uid):
+        text += (
+            "👑 管理命令：\n"
+            "/addvip 用户ID/@用户名\n"
+            "/delvip 用户ID/@用户名\n"
+            "/enablevip\n"
+            "/disablevip\n"
+            "/broadcast 内容\n"
+        )
+    elif is_vip(uid) and data.get("vip_enabled", True):
+        text += "💎 您是会员，投稿将自动发布。"
     else:
-        keyboard = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("✅ 通过", callback_data=f"approve|{user_id}|{message.message_id}"),
-                InlineKeyboardButton("❌ 拒绝", callback_data=f"reject|{user_id}|{message.message_id}")
-            ]
-        ])
-        await context.bot.send_message(chat_id=ADMIN_ID, text=f"用户 {user_id} 的投稿请求：\n{message.text}", reply_markup=keyboard)
-        await message.reply_text("⏳ 投稿已提交，等待管理员审核。")
+        text += "您可以投稿，投稿由管理员审核发布。\n点击下方成为会员免审核："
 
-async def button_handler(update: Update, context: CallbackContext):
+    keyboard = [
+        [InlineKeyboardButton("📨 投稿", callback_data="submit")],
+        [InlineKeyboardButton("💎 成为会员", url="https://t.me/Haohaoss")],
+    ]
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+# 投稿按钮回调
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await update.callback_query.message.reply_text("请直接发送文字、图片或视频投稿内容。")
+
+# 管理命令
+async def addvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return await update.message.reply_text("无权限")
+    if not context.args:
+        return await update.message.reply_text("格式：/addvip 用户ID/@用户名")
+    target = context.args[0]
+    try:
+        target_id = int(target) if not target.startswith("@") else (await context.bot.get_chat(target)).id
+        if target_id in data["vip_users"]:
+            return await update.message.reply_text("该用户已是会员。")
+        data["vip_users"].append(target_id)
+        save_data(data)
+        await update.message.reply_text(f"已添加会员：{target_id}")
+    except:
+        await update.message.reply_text("添加失败，检查用户是否与 Bot 有交集。")
+
+async def delvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id):
+        return await update.message.reply_text("无权限")
+    if not context.args:
+        return await update.message.reply_text("格式：/delvip 用户ID/@用户名")
+    target = context.args[0]
+    try:
+        target_id = int(target) if not target.startswith("@") else (await context.bot.get_chat(target)).id
+        if target_id in data["vip_users"]:
+            data["vip_users"].remove(target_id)
+            save_data(data)
+            await update.message.reply_text(f"已移除会员：{target_id}")
+        else:
+            await update.message.reply_text("该用户不是会员。")
+    except:
+        await update.message.reply_text("移除失败")
+
+async def enablevip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if is_admin(update.effective_user.id):
+        data["vip_enabled"] = True
+        save_data(data)
+        await update.message.reply_text("已启用免审核。")
+
+async def disablevip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if is_admin(update.effective_user.id):
+        data["vip_enabled"] = False
+        save_data(data)
+        await update.message.reply_text("已暂停免审核。")
+
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update.effective_user.id): return
+    msg = " ".join(context.args)
+    if not msg: return await update.message.reply_text("请输入内容")
+    count = 0
+    for uid in data["vip_users"]:
+        try:
+            await context.bot.send_message(uid, f"📢 广播消息：\n\n{msg}")
+            count += 1
+        except: pass
+    await update.message.reply_text(f"成功发送给 {count} 位会员")
+
+# 会员自动发帖
+async def forward_to_channel_anon(context: ContextTypes.DEFAULT_TYPE, msg):
+    if msg.text:
+        await context.bot.send_message(CHANNEL_ID, msg.text)
+    elif msg.photo:
+        await context.bot.send_photo(CHANNEL_ID, msg.photo[-1].file_id, caption=msg.caption or "")
+    elif msg.video:
+        await context.bot.send_video(CHANNEL_ID, msg.video.file_id, caption=msg.caption or "")
+
+# 待审核缓存
+pending_messages = {}
+
+# 普通用户投稿
+async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if is_admin(user_id): return
+    msg = update.message
+    if is_vip(user_id) and data.get("vip_enabled", True):
+        await forward_to_channel_anon(context, msg)
+        sent = await msg.reply_text("感谢您的投稿，已自动发布！")
+        asyncio.create_task(auto_delete_message(context, sent.chat_id, sent.message_id))
+        return
+
+    content_type = "text" if msg.text else "photo" if msg.photo else "video" if msg.video else None
+    if not content_type:
+        return await msg.reply_text("仅支持文字、图片、视频投稿。")
+
+    file_id = msg.photo[-1].file_id if msg.photo else msg.video.file_id if msg.video else None
+    content = msg.text or msg.caption or ""
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ 通过", callback_data=f"approve_{msg.message_id}"),
+        InlineKeyboardButton("❌ 拒绝", callback_data=f"reject_{msg.message_id}")
+    ]])
+
+    sent = await context.bot.send_message(
+        chat_id=ADMIN_ID,
+        text=f"新投稿（用户 {user_id}）:\n\n{content}" if content_type == "text" else "",
+        reply_markup=keyboard
+    ) if content_type == "text" else await context.bot.send_photo(
+        ADMIN_ID, file_id, caption=f"用户 {user_id}", reply_markup=keyboard
+    ) if content_type == "photo" else await context.bot.send_video(
+        ADMIN_ID, file_id, caption=f"用户 {user_id}", reply_markup=keyboard
+    )
+
+    pending_messages[str(sent.message_id)] = {
+        "user_id": user_id,
+        "content_type": content_type,
+        "content": content,
+        "file_id": file_id,
+    }
+    await msg.reply_text("您的投稿已提交，等待管理员审核。")
+
+# 审核回调
+async def approve_reject_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
-    data = query.data.split("|")
-    action, target_user_id, message_id = data[0], int(data[1]), int(data[2])
+    if not is_admin(query.from_user.id):
+        return await query.answer("无权限", show_alert=True)
+
+    action, msg_id = query.data.split("_")
+    msg_info = pending_messages.pop(msg_id, None)
+    if not msg_info:
+        return await query.answer("投稿不存在或已处理", show_alert=True)
+
+    uid = msg_info["user_id"]
+    ctype = msg_info["content_type"]
+    content = msg_info["content"]
+    fid = msg_info["file_id"]
 
     if action == "approve":
-        original_message = await context.bot.forward_message(chat_id=ADMIN_ID, from_chat_id=target_user_id, message_id=message_id)
-        if original_message.text:
-            await context.bot.send_message(chat_id=CHANNEL_ID, text=f"匿名投稿：\n{original_message.text}")
-        elif original_message.caption:
-            await context.bot.send_photo(chat_id=CHANNEL_ID, photo=original_message.photo[-1].file_id, caption=f"匿名投稿：\n{original_message.caption}")
-        await query.message.edit_text(f"✅ 已通过\n\n原文由用户 {target_user_id} 提交")
-        await context.bot.send_message(chat_id=target_user_id, text="✅ 你的投稿已被通过并发布。")
-
-    elif action == "reject":
-        await query.message.edit_text(f"❌ 已拒绝\n\n原文由用户 {target_user_id} 提交")
-        await context.bot.send_message(chat_id=target_user_id, text="❌ 很抱歉，你的投稿未被通过。")
-
-async def add_vip(update: Update, context: CallbackContext):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    try:
-        target = context.args[0]
-        if target.startswith("@"):  # 用户名
-            user = await context.bot.get_chat(target)
-            user_id = user.id
-        else:
-            user_id = int(target)
-        if user_id not in vip_users:
-            vip_users.append(user_id)
-            save_vip_users(vip_users)
-            await update.message.reply_text(f"✅ 已添加 {user_id} 为会员。")
-        else:
-            await update.message.reply_text(f"⚠️ 用户 {user_id} 已是会员。")
-    except Exception as e:
-        await update.message.reply_text("❌ 添加会员失败。请确保输入格式正确。")
-
-async def del_vip(update: Update, context: CallbackContext):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    try:
-        target = context.args[0]
-        if target.startswith("@"):  # 用户名
-            user = await context.bot.get_chat(target)
-            user_id = user.id
-        else:
-            user_id = int(target)
-        if user_id in vip_users:
-            vip_users.remove(user_id)
-            save_vip_users(vip_users)
-            await update.message.reply_text(f"✅ 已移除 {user_id} 的会员资格。")
-        else:
-            await update.message.reply_text(f"⚠️ 用户 {user_id} 不是会员。")
-    except Exception as e:
-        await update.message.reply_text("❌ 删除会员失败。请确保输入格式正确。")
-
-async def enable_vip(update: Update, context: CallbackContext):
-    global enable_vip_mode
-    if update.effective_user.id == ADMIN_ID:
-        enable_vip_mode = True
-        await update.message.reply_text("✅ 已启用会员免审核功能。")
-
-async def disable_vip(update: Update, context: CallbackContext):
-    global enable_vip_mode
-    if update.effective_user.id == ADMIN_ID:
-        enable_vip_mode = False
-        await update.message.reply_text("✅ 已关闭会员免审核功能。")
-
-async def broadcast(update: Update, context: CallbackContext):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    message = " ".join(context.args)
-    for user_id in vip_users:
+        await forward_to_channel_anon(context, Update(message=update.effective_message))
+        await context.bot.send_message(uid, "✅ 投稿已通过并发布")
         try:
-            await context.bot.send_message(chat_id=user_id, text=message)
-        except:
-            pass
+            if ctype in ("photo", "video"):
+                await query.edit_message_caption("✅ 已通过")
+            else:
+                await query.edit_message_text("✅ 已通过")
+        except: pass
+    else:
+        await context.bot.send_message(uid, "❌ 投稿未通过审核")
+        try:
+            if ctype in ("photo", "video"):
+                await query.edit_message_caption("❌ 已拒绝")
+            else:
+                await query.edit_message_text("❌ 已拒绝")
+        except: pass
+    await query.answer()
 
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("help", help_command))
-application.add_handler(CommandHandler("addvip", add_vip))
-application.add_handler(CommandHandler("delvip", del_vip))
-application.add_handler(CommandHandler("enablevip", enable_vip))
-application.add_handler(CommandHandler("disablevip", disable_vip))
-application.add_handler(CommandHandler("broadcast", broadcast))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-application.add_handler(CallbackQueryHandler(button_handler))
+# FastAPI 应用
+app = FastAPI()
+telegram_app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-if __name__ == '__main__':
-    import asyncio
-    async def main():
-        await bot.set_webhook(WEBHOOK_URL)
-        await application.initialize()
-        await application.start()
-        await application.updater.start_polling()
-    asyncio.run(main())
+telegram_app.add_handler(CommandHandler("start", start))
+telegram_app.add_handler(CommandHandler("addvip", addvip))
+telegram_app.add_handler(CommandHandler("delvip", delvip))
+telegram_app.add_handler(CommandHandler("enablevip", enablevip))
+telegram_app.add_handler(CommandHandler("disablevip", disablevip))
+telegram_app.add_handler(CommandHandler("broadcast", broadcast))
+telegram_app.add_handler(CallbackQueryHandler(approve_reject_callback, pattern="^(approve|reject)_"))
+telegram_app.add_handler(CallbackQueryHandler(button_handler, pattern="^submit$"))
+telegram_app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.VIDEO, handle_user_message))
+
+@app.on_event("startup")
+async def startup():
+    await telegram_app.initialize()
+    await telegram_app.bot.set_webhook(WEBHOOK_URL)
+
+@app.post("/")
+async def telegram_webhook(req: Request):
+    data = await req.json()
+    await telegram_app.update_queue.put(Update.de_json(data, telegram_app.bot))
+    return {"ok": True}
