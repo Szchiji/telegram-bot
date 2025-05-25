@@ -1,18 +1,19 @@
 import json
 from fastapi import FastAPI, Request
 from telegram import Update, Bot
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
-import os
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler,
+    MessageHandler, ContextTypes, filters
+)
 
 # === 配置 ===
 BOT_TOKEN = "8092070129:AAGxrcDxMFniPLjNnZ4eNYd-Mtq9JBra-60"
-CHANNEL_ID = -1001763041158  # 替换为你的频道 ID
-ADMIN_ID = 7848870377        # 替换为你的管理员 ID
+CHANNEL_ID = -1001763041158
+ADMIN_ID = 7848870377
 BLACKLIST_FILE = "blacklist.json"
 
 app = FastAPI()
 bot = Bot(token=BOT_TOKEN)
-
 
 # === 黑名单相关函数 ===
 def load_blacklist():
@@ -30,7 +31,6 @@ def is_blacklisted(user_id, username):
     blacklist = load_blacklist()
     return str(user_id) in blacklist or (username and username.lower() in blacklist)
 
-
 # === 处理用户消息 ===
 async def forward_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -45,15 +45,18 @@ async def forward_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.message.text:
             await bot.send_message(chat_id=CHANNEL_ID, text=update.message.text)
         elif update.message.photo:
-            await bot.send_photo(chat_id=CHANNEL_ID, photo=update.message.photo[-1].file_id, caption=update.message.caption or "")
+            await bot.send_photo(chat_id=CHANNEL_ID, photo=update.message.photo[-1].file_id,
+                                 caption=update.message.caption or "")
         elif update.message.video:
-            await bot.send_video(chat_id=CHANNEL_ID, video=update.message.video.file_id, caption=update.message.caption or "")
+            await bot.send_video(chat_id=CHANNEL_ID, video=update.message.video.file_id,
+                                 caption=update.message.caption or "")
         elif update.message.document:
-            await bot.send_document(chat_id=CHANNEL_ID, document=update.message.document.file_id, caption=update.message.caption or "")
+            await bot.send_document(chat_id=CHANNEL_ID, document=update.message.document.file_id,
+                                    caption=update.message.caption or "")
         else:
             await bot.send_message(chat_id=CHANNEL_ID, text="[收到一个不支持的消息类型]")
 
-# === 管理员命令：添加/移除黑名单 ===
+# === 管理员命令 ===
 async def add_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -61,8 +64,8 @@ async def add_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("用法：/ban 用户ID 或 @用户名")
         return
 
-    blacklist = load_blacklist()
     target = context.args[0].lower()
+    blacklist = load_blacklist()
     if target not in blacklist:
         blacklist.append(target)
         save_blacklist(blacklist)
@@ -77,8 +80,8 @@ async def remove_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("用法：/unban 用户ID 或 @用户名")
         return
 
-    blacklist = load_blacklist()
     target = context.args[0].lower()
+    blacklist = load_blacklist()
     if target in blacklist:
         blacklist.remove(target)
         save_blacklist(blacklist)
@@ -86,8 +89,13 @@ async def remove_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(f"{target} 不在黑名单中")
 
+# === 初始化 Telegram 应用 ===
+application = ApplicationBuilder().token(BOT_TOKEN).build()
+application.add_handler(MessageHandler(filters.ALL & (~filters.COMMAND), forward_message))
+application.add_handler(CommandHandler("ban", add_blacklist))
+application.add_handler(CommandHandler("unban", remove_blacklist))
 
-# === Webhook 接收入口 ===
+# === Webhook 接口 ===
 @app.post("/")
 async def webhook(request: Request):
     data = await request.json()
@@ -95,9 +103,15 @@ async def webhook(request: Request):
     await application.update_queue.put(update)
     return {"ok": True}
 
+# === FastAPI 启动和关闭事件 ===
+@app.on_event("startup")
+async def on_startup():
+    await application.initialize()
+    await application.start()
+    print("Bot 启动成功")
 
-# === 启动应用（使用 Webhook） ===
-application = ApplicationBuilder().token(BOT_TOKEN).build()
-application.add_handler(MessageHandler(filters.ALL & (~filters.COMMAND), forward_message))
-application.add_handler(CommandHandler("ban", add_blacklist))
-application.add_handler(CommandHandler("unban", remove_blacklist))
+@app.on_event("shutdown")
+async def on_shutdown():
+    await application.stop()
+    await application.shutdown()
+    print("Bot 已关闭")
