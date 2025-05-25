@@ -231,8 +231,7 @@ async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     if is_user_vip and vip_enabled:
         # 免审核直接转发
         await forward_to_channel_anon(context, msg)
-        await msg.reply_text("您的投稿已自动发布，感谢支持会员！", quote=False)
-        sent = await msg.reply_text("感谢您的投稿！", quote=False)
+        sent = await msg.reply_text("您的投稿已自动发布，感谢支持会员！", quote=False)
         asyncio.create_task(auto_delete_message(context, sent.chat_id, sent.message_id))
     else:
         # 需要审核的投稿
@@ -327,8 +326,6 @@ async def approve_reject_callback(update: Update, context: ContextTypes.DEFAULT_
         return
 
     msg_info = pending_messages.pop(msg_id)
-    # 保存最新状态
-    # 这里简单写成直接覆盖即可，按需改进
     save_data(data)
 
     target_user_id = msg_info["user_id"]
@@ -353,56 +350,25 @@ async def approve_reject_callback(update: Update, context: ContextTypes.DEFAULT_
         # 编辑管理员消息标记通过
         try:
             if content_type in ("photo", "video"):
-                await query.edit_message_caption("已通过 ✅")
-            else:
-                await query.edit_message_text("已通过 ✅")
-        except Exception:
-            pass
+            await query.message.edit_caption(f"✅ 已通过\n\n原文由用户 {target_user_id} 提交")
+        else:
+            await query.message.edit_text(f"✅ 已通过\n\n原文由用户 {target_user_id} 提交")
+    except:
+        pass
 
-    elif action == "reject":
-        try:
-            await context.bot.send_message(chat_id=target_user_id, text="您的投稿未通过审核。")
-        except Exception:
-            pass
+elif action == "reject":
+    try:
+        await context.bot.send_message(chat_id=target_user_id, text="很抱歉，您的投稿未通过审核。")
+    except:
+        pass
 
-        try:
-            if content_type in ("photo", "video"):
-                await query.edit_message_caption("已拒绝 ❌")
-            else:
-                await query.edit_message_text("已拒绝 ❌")
-        except Exception:
-            pass
+    try:
+        if content_type in ("photo", "video"):
+            await query.message.edit_caption(f"❌ 已拒绝\n\n原文由用户 {target_user_id} 提交")
+        else:
+            await query.message.edit_text(f"❌ 已拒绝\n\n原文由用户 {target_user_id} 提交")
+    except:
+        pass
 
-    await query.answer()
-
-async def main():
-    app = (
-        ApplicationBuilder()
-        .token(BOT_TOKEN)
-        .build()
-    )
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("addvip", addvip))
-    app.add_handler(CommandHandler("delvip", delvip))
-    app.add_handler(CommandHandler("enablevip", enablevip))
-    app.add_handler(CommandHandler("disablevip", disablevip))
-    app.add_handler(CommandHandler("broadcast", broadcast))
-
-    app.add_handler(CallbackQueryHandler(approve_reject_callback, pattern="^(approve|reject)_"))
-    app.add_handler(CallbackQueryHandler(button_handler, pattern="^submit$"))
-
-    app.add_handler(MessageHandler(filters.TEXT | filters.PHOTO | filters.VIDEO, handle_user_message))
-
-    # 启动Webhook
-    await app.start()
-    await app.updater.bot.set_webhook(WEBHOOK_URL)
-    print("Bot started with webhook:", WEBHOOK_URL)
-    await app.updater.start_polling()  # 也可以用长轮询备选，或者用 app.run_webhook 取决于部署方式
-
-    await app.idle()
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+await query.answer("操作完成")
 
