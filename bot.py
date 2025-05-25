@@ -11,7 +11,7 @@ from telegram.ext import (
 )
 
 # ===== 配置 =====
-BOT_TOKEN = '你的-BOT-TOKEN'
+BOT_TOKEN = '8092070129:AAFuE3WBP6z7YyFpY1uIE__WujCOv6jd-oI'
 CHANNEL_ID = -1001763041158
 ADMIN_IDS = [7848870377]
 VIP_FILE = 'vip_users.json'
