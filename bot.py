@@ -13,7 +13,7 @@ from telegram.ext import (
 BOT_TOKEN = "8092070129:AAGxrcDxMFniPLjNnZ4eNYd-Mtq9JBra-60"
 CHANNEL_ID = -1001763041158
 ADMIN_IDS = [7848870377]
-WEBHOOK_DOMAIN = "telegram-bot-se3s.onrender.com"
+WEBHOOK_DOMAIN = "https://telegram-bot-p5yt.onrender.com"
 
 VIP_FILE = "vip_users.json"
 
