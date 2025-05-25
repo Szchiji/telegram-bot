@@ -12,6 +12,6 @@ services:
       - key: ADMIN_IDS
         value: "7848870377"
       - key: WEBHOOK_DOMAIN
-        value: yourbot.onrender.com   # 请替换成你的 Render 域名
+        value: telegram-bot-se3s.onrender.com   # 请替换成你的 Render 域名
     buildCommand: "pip install -r requirements.txt"
     startCommand: "python bot.py"
