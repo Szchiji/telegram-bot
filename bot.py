@@ -10,10 +10,10 @@ from telegram.ext import (
     filters,
 )
 
-BOT_TOKEN = "8092070129:AAGxrcDxMFniPLjNnZ4eNYd-Mtq9JBra-60"
+BOT_TOKEN = "8092070129:AAGxrcDxMFniPLjN4eNYd-Mtq9JBra-60"
 CHANNEL_ID = -1001763041158
 ADMIN_IDS = [7848870377]
-WEBHOOK_DOMAIN = "https://telegram-bot-p5yt.onrender.com"
+WEBHOOK_DOMAIN = "telegram-bot-p5yt.onrender.com"  # 这里只写域名，不带 https://
 
 VIP_FILE = "vip_users.json"
 
@@ -193,12 +193,14 @@ async def main():
     WEBHOOK_PATH = f"/bot{BOT_TOKEN}"
     WEBHOOK_URL = f"https://{WEBHOOK_DOMAIN}{WEBHOOK_PATH}"
 
+    port = int(os.environ.get("PORT", 8443))
+
     await app.bot.set_webhook(WEBHOOK_URL)
 
     await app.run_webhook(
         listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 8443)),
-        webhook_url=WEBHOOK_URL,  # 正确使用 webhook_url 参数
+        port=port,
+        webhook_url=WEBHOOK_URL,
     )
 
 
@@ -206,4 +208,3 @@ if __name__ == "__main__":
     import asyncio
 
     asyncio.run(main())
-
