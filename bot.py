@@ -101,7 +101,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ✅ Webhook 启动配置
 async def set_webhook(app):
-    await app.bot.set_webhook("https://telegram-bot-nze9.onrender.com/webhook")
+    await app.bot.set_webhook("https://telegram-bot-g6id.onrender.com/webhook")
 
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
