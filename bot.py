@@ -1,29 +1,25 @@
 import os
-import asyncio
+from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-BOT_TOKEN = "8092070129:AAGxrcDxMFniPLjNnZ4eNYd-Mtq9JBra-60"
-WEBHOOK_DOMAIN = "telegram-bot-p5yt.onrender.com"  # 不带 https://
-WEBHOOK_PATH = f"/bot{BOT_TOKEN}"
-WEBHOOK_URL = f"https://{WEBHOOK_DOMAIN}{WEBHOOK_PATH}"
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8092070129:AAGxrcDxMFniPLjNnZ4eNYd-Mtq9JBra-60")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://telegram-bot-p5yt.onrender.com/")  # 结尾加斜杠
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("欢迎使用Bot，已成功连接Webhook！")
+    await update.message.reply_text("机器人启动成功！")
 
-async def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-
+def main():
+    app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
 
-    await app.bot.set_webhook(WEBHOOK_URL)
+    port = int(os.environ.get("PORT", "8443"))
 
-    await app.run_webhook(
+    app.run_webhook(
         listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 8443)),
-        webhook_url=WEBHOOK_URL,
-        webhook_path=WEBHOOK_PATH,
+        port=port,
+        url_path=BOT_TOKEN,
+        webhook_url=WEBHOOK_URL + BOT_TOKEN,
     )
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
