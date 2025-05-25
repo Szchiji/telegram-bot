@@ -10,7 +10,7 @@ from telegram.ext import (
     filters,
 )
 
-BOT_TOKEN = "8092070129:AAGxrcDxMFniPLjN4eNYd-Mtq9JBra-60"
+BOT_TOKEN = "8092070129:AAGxrcDxMFniPLjNnZ4eNYd-Mtq9JBra-60"
 CHANNEL_ID = -1001763041158
 ADMIN_IDS = [7848870377]
 WEBHOOK_DOMAIN = "telegram-bot-p5yt.onrender.com"  # 这里只写域名，不带 https://
