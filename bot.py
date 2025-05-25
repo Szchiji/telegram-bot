@@ -2,7 +2,7 @@ import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
-BOT_TOKEN = "8092070129:AAFuE3WBP6z7YyFpY1uIE__WujCOv6jd-oI"
+BOT_TOKEN = "8092070129:AAGxrcDxMFniPLjNnZ4eNYd-Mtq9JBra-60"
 CHANNEL_ID = -1001763041158
 ADMIN_IDS = [7848870377]
 
@@ -22,27 +22,27 @@ def save_vip_users(vips):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
         "欢迎使用投稿 Bot！\n\n"
-        "您可以发送消息给我，我将提交管理员审核，通过后将匿名发到频道。\n\n"
-        "成为会员可跳过审核，自动匿名发布。\n"
-        "输入 /buyvip 查看成为会员的方式。"
+        "发送消息给我将提交管理员审核，通过后将匿名发到频道。\n"
+        "成为会员可跳过审核，自动发布。\n"
+        "输入 /buyvip 了解如何成为会员。"
     )
     await update.message.reply_text(msg)
 
 async def buyvip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("请联系管理员充值成为会员。管理员 Telegram ID：@Haohaoss")
+    await update.message.reply_text("请联系管理员 @Haohaoss 充值成为会员。")
 
 async def add_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         return
     if not context.args:
-        await update.message.reply_text("用法：/addvip 用户ID或@用户名")
+        await update.message.reply_text("用法：/addvip 用户ID 或 @用户名")
         return
     user = context.args[0]
     vips = load_vip_users()
     if user not in vips:
         vips.append(user)
         save_vip_users(vips)
-        await update.message.reply_text(f"{user} 已被添加为会员。")
+        await update.message.reply_text(f"{user} 已添加为会员。")
     else:
         await update.message.reply_text(f"{user} 已是会员。")
 
@@ -50,14 +50,14 @@ async def del_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS:
         return
     if not context.args:
-        await update.message.reply_text("用法：/delvip 用户ID或@用户名")
+        await update.message.reply_text("用法：/delvip 用户ID 或 @用户名")
         return
     user = context.args[0]
     vips = load_vip_users()
     if user in vips:
         vips.remove(user)
         save_vip_users(vips)
-        await update.message.reply_text(f"{user} 已被移除会员。")
+        await update.message.reply_text(f"{user} 已移除会员。")
     else:
         await update.message.reply_text(f"{user} 不是会员。")
 
@@ -76,7 +76,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [InlineKeyboardButton("通过", callback_data=f"approve|{update.message.text}|{user.id}")],
                 [InlineKeyboardButton("拒绝", callback_data=f"reject|{user.id}")]
             ])
-            await context.bot.send_message(chat_id=admin_id, text=f"收到用户投稿：\n\n{update.message.text}", reply_markup=keyboard)
+            await context.bot.send_message(chat_id=admin_id, text=f"收到投稿：\n\n{update.message.text}", reply_markup=keyboard)
         await update.message.reply_text("您的消息已提交审核，请等待管理员处理。")
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -88,11 +88,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "approve":
         text, user_id = data[1], int(data[2])
         await context.bot.send_message(chat_id=CHANNEL_ID, text=text)
-        await context.bot.send_message(chat_id=user_id, text="您的投稿已通过审核并匿名发布到频道。")
-        await query.edit_message_text("已通过并发布到频道。")
+        await context.bot.send_message(chat_id=user_id, text="您的投稿已通过审核并发布到频道。")
+        await query.edit_message_text("已通过，消息已发布。")
     elif action == "reject":
         user_id = int(data[1])
-        await context.bot.send_message(chat_id=user_id, text="您的投稿未通过审核，请重新尝试。")
+        await context.bot.send_message(chat_id=user_id, text="您的投稿未通过审核。")
         await query.edit_message_text("已拒绝。")
 
 def main():
