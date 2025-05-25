@@ -15,4 +15,4 @@ services:
       - key: ADMIN_IDS
         value: "7848870377"
       - key: WEBHOOK_DOMAIN
-        value: "telegram-bot-se3s.onrender.com"
+        value: "telegram-bot-p5yt.onrender.com"
