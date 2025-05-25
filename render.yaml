@@ -4,14 +4,15 @@ services:
     env: python
     region: oregon
     plan: free
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
     envVars:
       - key: BOT_TOKEN
-        value: 8092070129:AAGxrcDxMFniPLjNnZ4eNYd-Mtq9JBra-60
+        value: "8092070129:AAGxrcDxMFniPLjNnZ4eNYd-Mtq9JBra-60"
       - key: CHANNEL_ID
         value: "-1001763041158"
       - key: ADMIN_IDS
         value: "7848870377"
       - key: WEBHOOK_DOMAIN
-        value: telegram-bot-se3s.onrender.com   # 请替换成你的 Render 域名
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python bot.py"
+        value: "telegram-bot-se3s.onrender.com"
