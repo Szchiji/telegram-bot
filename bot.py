@@ -1,71 +1,104 @@
+import json
+from fastapi import FastAPI, Request
+from telegram import Update, Bot
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 import os
-import logging
-from fastapi import FastAPI, Request, Response
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # 从环境变量中读取
-CHANNEL_ID = os.getenv("CHANNEL_ID", "-1001763041158")
-ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "7848870377"))
+# === 配置 ===
+BOT_TOKEN = "8092070129:AAGxrcDxMFniPLjNnZ4eNYd-Mtq9JBra-60"
+CHANNEL_ID = -1001763041158  # 替换为你的频道 ID
+ADMIN_ID = 7848870377        # 替换为你的管理员 ID
+BLACKLIST_FILE = "blacklist.json"
 
-# 创建 FastAPI 应用
 app = FastAPI()
+bot = Bot(token=BOT_TOKEN)
 
-# 创建 Telegram Application
-application = Application.builder().token(BOT_TOKEN).build()
 
-# 日志配置
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
-
-# 命令：/broadcast
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id != ADMIN_USER_ID:
-        await update.message.reply_text("❌ 你没有权限使用此命令。")
-        return
-
-    if not context.args:
-        await update.message.reply_text("⚠️ 请在命令后输入要广播的内容。")
-        return
-
-    text = " ".join(context.args)
+# === 黑名单相关函数 ===
+def load_blacklist():
     try:
-        await context.bot.send_message(chat_id=CHANNEL_ID, text=text)
-        await update.message.reply_text("✅ 广播成功。")
-    except Exception as e:
-        await update.message.reply_text(f"❌ 发送失败：{e}")
+        with open(BLACKLIST_FILE, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return []
 
-# 匿名转发普通用户消息
-async def anonymous_forward(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type != "private":
+def save_blacklist(blacklist):
+    with open(BLACKLIST_FILE, "w") as f:
+        json.dump(blacklist, f)
+
+def is_blacklisted(user_id, username):
+    blacklist = load_blacklist()
+    return str(user_id) in blacklist or (username and username.lower() in blacklist)
+
+
+# === 处理用户消息 ===
+async def forward_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    user_id = str(user.id)
+    username = user.username.lower() if user.username else None
+
+    if is_blacklisted(user_id, username):
+        await update.message.reply_text("您已被禁言，无法使用本 Bot。")
         return
 
-    message = update.message
-    if message.text:
-        await context.bot.send_message(chat_id=CHANNEL_ID, text=f"📩 匿名消息：\n{message.text}")
-        await message.reply_text("✅ 已匿名转发到频道。")
-    elif message.photo:
-        await context.bot.send_photo(chat_id=CHANNEL_ID, photo=message.photo[-1].file_id,
-                                     caption=f"📷 匿名图片：\n{message.caption or ''}")
-        await message.reply_text("✅ 已匿名转发图片到频道。")
+    if update.message:
+        if update.message.text:
+            await bot.send_message(chat_id=CHANNEL_ID, text=update.message.text)
+        elif update.message.photo:
+            await bot.send_photo(chat_id=CHANNEL_ID, photo=update.message.photo[-1].file_id, caption=update.message.caption or "")
+        elif update.message.video:
+            await bot.send_video(chat_id=CHANNEL_ID, video=update.message.video.file_id, caption=update.message.caption or "")
+        elif update.message.document:
+            await bot.send_document(chat_id=CHANNEL_ID, document=update.message.document.file_id, caption=update.message.caption or "")
+        else:
+            await bot.send_message(chat_id=CHANNEL_ID, text="[收到一个不支持的消息类型]")
+
+# === 管理员命令：添加/移除黑名单 ===
+async def add_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if not context.args:
+        await update.message.reply_text("用法：/ban 用户ID 或 @用户名")
+        return
+
+    blacklist = load_blacklist()
+    target = context.args[0].lower()
+    if target not in blacklist:
+        blacklist.append(target)
+        save_blacklist(blacklist)
+        await update.message.reply_text(f"{target} 已加入黑名单")
     else:
-        await message.reply_text("❌ 不支持的消息类型。")
+        await update.message.reply_text(f"{target} 已在黑名单中")
 
-# 添加处理器
-application.add_handler(CommandHandler("broadcast", broadcast))
-application.add_handler(MessageHandler(filters.ALL & (~filters.COMMAND), anonymous_forward))
+async def remove_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    if not context.args:
+        await update.message.reply_text("用法：/unban 用户ID 或 @用户名")
+        return
 
-# FastAPI 路由，Telegram 调用 Webhook 发送消息时触发
-@app.post("/webhook")
+    blacklist = load_blacklist()
+    target = context.args[0].lower()
+    if target in blacklist:
+        blacklist.remove(target)
+        save_blacklist(blacklist)
+        await update.message.reply_text(f"{target} 已从黑名单移除")
+    else:
+        await update.message.reply_text(f"{target} 不在黑名单中")
+
+
+# === Webhook 接收入口 ===
+@app.post("/")
 async def webhook(request: Request):
     data = await request.json()
-    update = Update.de_json(data, application.bot)
+    update = Update.de_json(data, bot)
     await application.update_queue.put(update)
-    return Response(status_code=200)
+    return {"ok": True}
 
-# 本地开发调试
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("bot:app", host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+
+# === 启动应用（使用 Webhook） ===
+application = ApplicationBuilder().token(BOT_TOKEN).build()
+application.add_handler(MessageHandler(filters.ALL & (~filters.COMMAND), forward_message))
+application.add_handler(CommandHandler("ban", add_blacklist))
+application.add_handler(CommandHandler("unban", remove_blacklist))
+
