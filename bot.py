@@ -1,6 +1,10 @@
+import os
 import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
+    ContextTypes, filters
+)
 
 BOT_TOKEN = "8092070129:AAGxrcDxMFniPLjNnZ4eNYd-Mtq9JBra-60"
 CHANNEL_ID = -1001763041158
@@ -95,15 +99,26 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id=user_id, text="您的投稿未通过审核，请重新尝试，请联系管理员。")
         await query.edit_message_text("已拒绝。")
 
+# ✅ Webhook 启动配置
+async def set_webhook(app):
+    await app.bot.set_webhook("https://telegram-bot-nze9.onrender.com/webhook")
+
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("buyvip", buyvip))
     app.add_handler(CommandHandler("addvip", add_vip))
     app.add_handler(CommandHandler("delvip", del_vip))
     app.add_handler(CallbackQueryHandler(button_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.run_polling()
+
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.environ.get("PORT", 10000)),
+        webhook_path="/webhook",
+        on_startup=set_webhook
+    )
 
 if __name__ == "__main__":
     main()
