@@ -17,8 +17,7 @@ WEBHOOK_DOMAIN = "telegram-bot-se3s.onrender.com"
 
 VIP_FILE = "vip_users.json"
 
-# 会员机制开关
-vip_mode = True
+vip_mode = True  # 会员机制开关
 
 
 def load_vip_users():
@@ -37,7 +36,6 @@ def save_vip_users(vips):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id not in ADMIN_IDS:
-        # 普通用户不展示 /start 内容
         return
     msg = (
         "欢迎使用投稿 Bot！\n\n"
@@ -117,9 +115,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sent = 0
     for user in vips:
         try:
-            # 支持两种存储格式：纯数字ID 或 @用户名
             if user.startswith("@"):
-                # 通过用户名发送
                 await context.bot.send_message(chat_id=user, text=f"管理员广播：\n\n{msg}")
             else:
                 await context.bot.send_message(chat_id=int(user), text=f"管理员广播：\n\n{msg}")
@@ -138,7 +134,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if vip_mode and (user_id_str in vips or username in vips):
         await context.bot.send_message(chat_id=CHANNEL_ID, text=update.message.text)
         msg = await update.message.reply_text("您的消息已匿名发布到频道。")
-        # 1分钟后删除反馈消息
         await context.job_queue.run_once(
             lambda ctx: ctx.bot.delete_message(chat_id=msg.chat_id, message_id=msg.message_id),
             when=60,
@@ -149,8 +144,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [
                     [
                         InlineKeyboardButton(
-                            "通过",
-                            callback_data=f"approve|{update.message.text}|{user.id}",
+                            "通过", callback_data=f"approve|{update.message.text}|{user.id}"
                         )
                     ],
                     [InlineKeyboardButton("拒绝", callback_data=f"reject|{user.id}")],
@@ -160,7 +154,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 chat_id=admin_id, text=f"收到投稿：\n\n{update.message.text}", reply_markup=keyboard
             )
         msg = await update.message.reply_text("您的消息已提交审核，请等待管理员处理。")
-        # 1分钟后删除反馈消息
         await context.job_queue.run_once(
             lambda ctx: ctx.bot.delete_message(chat_id=msg.chat_id, message_id=msg.message_id),
             when=60,
@@ -197,14 +190,15 @@ async def main():
     app.add_handler(CallbackQueryHandler(button_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    WEBHOOK_URL = f"https://{WEBHOOK_DOMAIN}/bot{BOT_TOKEN}"
+    WEBHOOK_PATH = f"/bot{BOT_TOKEN}"
+    WEBHOOK_URL = f"https://{WEBHOOK_DOMAIN}{WEBHOOK_PATH}"
 
     await app.bot.set_webhook(WEBHOOK_URL)
 
     await app.run_webhook(
         listen="0.0.0.0",
         port=int(os.environ.get("PORT", 8443)),
-        webhook_path=f"/bot{BOT_TOKEN}",
+        webhook_url=WEBHOOK_URL,  # 正确使用 webhook_url 参数
     )
 
 
@@ -212,3 +206,4 @@ if __name__ == "__main__":
     import asyncio
 
     asyncio.run(main())
+
