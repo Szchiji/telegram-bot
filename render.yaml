@@ -1,14 +1,6 @@
 services:
   - type: web
-    name: telegram-bot
     env: python
-    plan: starter
-    branch: main
-    buildCommand: pip install -r requirements.txt
-    startCommand: python bot.py
-    envVars:
-      - key: BOT_TOKEN
-        value: "8092070129:AAGxrcDxMFniPLjNnZ4eNYd-Mtq9JBra-60"
-      - key: WEBHOOK_URL
-        value: "https://telegram-bot-p5yt.onrender.com/"
-
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python bot.py"
