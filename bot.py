@@ -2,7 +2,7 @@ import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
-BOT_TOKEN = "8092070129:AAFuE3WBP6z7YyFpY1uIE__WujCOv6jd-oI"
+BOT_TOKEN = "8092070129:AAGxrcDxMFniPLjNnZ4eNYd-Mtq9JBra-60"
 CHANNEL_ID = -1001763041158
 ADMIN_IDS = [7848870377]
 
