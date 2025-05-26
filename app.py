@@ -1,134 +1,161 @@
 from flask import Flask, request
 import requests
-import sqlite3
+import json
 import os
+
+TOKEN = "7660420861:AAEZDq7QVIva3aq4jEQpj-xhwdpRp7ceMdc"
+ADMIN_ID = 5528758975
+API_URL = f"https://api.telegram.org/bot{TOKEN}"
+WEBHOOK_URL = "https://telegram-bot-329q.onrender.com"
 
 app = Flask(__name__)
 
-# === 配置区 ===
-TOKEN = '7660420861:AAEZDq7QVIva3aq4jEQpj-xhwdpRp7ceMdc'
-ADMIN_ID = 5528758975  # 管理员 Telegram 用户 ID
-WEBHOOK_URL = f'https://telegram-bot-nkal.onrender.com/{TOKEN}'
+CHANNELS_FILE = "channels.json"
+if not os.path.exists(CHANNELS_FILE):
+    with open(CHANNELS_FILE, "w") as f:
+        json.dump({}, f)
 
-DB_PATH = '/mnt/data/channels.db'
-
-# === 数据库初始化 ===
-def init_db():
-    os.makedirs('/mnt/data', exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS channels (
-            channel_id INTEGER PRIMARY KEY
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-def add_channel(channel_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('INSERT OR IGNORE INTO channels (channel_id) VALUES (?)', (channel_id,))
-    conn.commit()
-    conn.close()
+def save_channel(channel_id, title):
+    with open(CHANNELS_FILE, "r") as f:
+        data = json.load(f)
+    if str(channel_id) not in data:
+        data[str(channel_id)] = title
+        with open(CHANNELS_FILE, "w") as f:
+            json.dump(data, f)
 
 def get_channels():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT channel_id FROM channels')
-    rows = cursor.fetchall()
-    conn.close()
-    return [row[0] for row in rows]
+    with open(CHANNELS_FILE, "r") as f:
+        return json.load(f)
 
-# === 转发功能 ===
-def send_channel_choice(chat_id, msg):
-    channels = get_channels()
-    if not channels:
-        requests.post(f'https://api.telegram.org/bot{TOKEN}/sendMessage', json={
-            'chat_id': chat_id,
-            'text': '暂无可用频道，请先向频道发送一条消息以授权机器人。'
-        })
+def send_to_channel(channel_id, content, content_type):
+    payload = {
+        "chat_id": int(channel_id),
+        "disable_notification": True
+    }
+
+    if content_type == "text":
+        payload["text"] = content
+        url = f"{API_URL}/sendMessage"
+    elif content_type == "photo":
+        payload["photo"] = content
+        url = f"{API_URL}/sendPhoto"
+    elif content_type == "video":
+        payload["video"] = content
+        url = f"{API_URL}/sendVideo"
+    else:
         return
 
-    buttons = [[{'text': str(cid), 'callback_data': f'{cid}|{msg["message_id"]}'}] for cid in channels]
-    requests.post(f'https://api.telegram.org/bot{TOKEN}/sendMessage', json={
-        'chat_id': chat_id,
-        'text': '请选择要转发的频道：',
-        'reply_markup': {'inline_keyboard': buttons}
-    })
+    response = requests.post(url, json=payload)
+    result = response.json()
 
-def forward_to_channel(channel_id, msg):
-    if 'text' in msg:
-        text = msg['text']
-        requests.post(f'https://api.telegram.org/bot{TOKEN}/sendMessage', json={
-            'chat_id': channel_id,
-            'text': text
-        })
-    elif 'photo' in msg:
-        requests.post(f'https://api.telegram.org/bot{TOKEN}/sendPhoto', json={
-            'chat_id': channel_id,
-            'photo': msg['photo'][-1]['file_id'],
-            'caption': msg.get('caption', '')
-        })
-    elif 'video' in msg:
-        requests.post(f'https://api.telegram.org/bot{TOKEN}/sendVideo', json={
-            'chat_id': channel_id,
-            'video': msg['video']['file_id'],
-            'caption': msg.get('caption', '')
-        })
+    # 自动移除失效频道
+    if not result.get("ok"):
+        desc = result.get("description", "")
+        if "chat not found" in desc or "not enough rights" in desc:
+            with open(CHANNELS_FILE, "r") as f:
+                channels = json.load(f)
+            if str(channel_id) in channels:
+                del channels[str(channel_id)]
+                with open(CHANNELS_FILE, "w") as f:
+                    json.dump(channels, f)
 
-# === Webhook 接收消息 ===
-@app.route(f'/{TOKEN}', methods=['POST'])
+@app.route("/", methods=["POST"])
 def webhook():
-    init_db()
-    data = request.get_json()
-    print('收到更新:', data)
+    data = request.json
 
-    if 'message' in data:
-        msg = data['message']
-        user_id = msg['from']['id']
+    # 记录新加入频道
+    if "my_chat_member" in data:
+        chat = data["my_chat_member"]["chat"]
+        new_status = data["my_chat_member"]["new_chat_member"]["status"]
+        if chat["type"] == "channel" and new_status in ["administrator", "member"]:
+            save_channel(chat["id"], chat["title"])
+        return "ok"
 
-        # 如果是频道消息，记录频道 ID
-        if msg['chat']['type'] == 'channel':
-            add_channel(msg['chat']['id'])
-            return 'OK'
+    # 处理消息
+    if "message" in data:
+        msg = data["message"]
+        user_id = msg["from"]["id"]
 
-        # 管理员发送私聊消息，弹出频道选择
-        if user_id == ADMIN_ID and msg['chat']['type'] == 'private':
-            send_channel_choice(msg['chat']['id'], msg)
-    
-    elif 'callback_query' in data:
-        query = data['callback_query']
-        chat_id = query['message']['chat']['id']
-        msg_id = int(query['data'].split('|')[1])
-        channel_id = int(query['data'].split('|')[0])
-        original_msg = requests.get(
-            f'https://api.telegram.org/bot{TOKEN}/getMessage',
-            params={'chat_id': chat_id, 'message_id': msg_id}
-        ).json()
-        if 'result' in original_msg:
-            forward_to_channel(channel_id, original_msg['result'])
+        if user_id != ADMIN_ID:
+            return "not admin"
 
-        # 回答回调
-        requests.post(f'https://api.telegram.org/bot{TOKEN}/answerCallbackQuery', json={
-            'callback_query_id': query['id'],
-            'text': '已转发'
+        if "text" in msg and msg["text"] == "/help":
+            help_text = (
+                "发送文字、图片或视频后，机器人会弹出频道选择按钮。\n"
+                "点击频道按钮即可匿名转发。\n"
+                "点击“全部频道”将同时发送到所有频道。\n\n"
+                "支持：频道中文名、频道自动记录、多频道群发、/help 指令。"
+            )
+            requests.post(f"{API_URL}/sendMessage", json={
+                "chat_id": ADMIN_ID,
+                "text": help_text
+            })
+            return "ok"
+
+        # 记录内容
+        content_type, content_value = None, None
+        if "text" in msg:
+            content_type = "text"
+            content_value = msg["text"]
+        elif "photo" in msg:
+            content_type = "photo"
+            content_value = msg["photo"][-1]["file_id"]
+        elif "video" in msg:
+            content_type = "video"
+            content_value = msg["video"]["file_id"]
+        else:
+            return "unsupported"
+
+        with open("last_message.json", "w") as f:
+            json.dump({
+                "type": content_type,
+                "value": content_value
+            }, f)
+
+        # 显示频道按钮
+        channels = get_channels()
+        buttons = [[{"text": v, "callback_data": k}] for k, v in channels.items()]
+        if buttons:
+            buttons.append([{"text": "全部频道", "callback_data": "ALL_CHANNELS"}])
+
+        requests.post(f"{API_URL}/sendMessage", json={
+            "chat_id": ADMIN_ID,
+            "text": "请选择要发送到的频道：",
+            "reply_markup": {"inline_keyboard": buttons}
         })
 
-    return 'OK'
+    # 处理按钮点击
+    elif "callback_query" in data:
+        query = data["callback_query"]
+        user_id = query["from"]["id"]
+        data_value = query["data"]
 
-# === 设置 Webhook（仅首次部署后访问一次） ===
-@app.route('/set_webhook')
-def set_webhook():
-    url = f"https://api.telegram.org/bot{TOKEN}/setWebhook"
-    response = requests.post(url, data={'url': WEBHOOK_URL})
-    return response.text
+        if user_id != ADMIN_ID:
+            return "not admin"
 
-# === 首页检查 ===
-@app.route('/')
-def index():
-    return 'Bot 正在运行...'
+        if os.path.exists("last_message.json"):
+            with open("last_message.json", "r") as f:
+                msg_data = json.load(f)
 
-if __name__ == '__main__':
-    init_db()
-    app.run(host='0.0.0.0', port=10000)
+            if data_value == "ALL_CHANNELS":
+                channels = get_channels()
+                for cid in list(channels.keys()):
+                    send_to_channel(cid, msg_data["value"], msg_data["type"])
+                answer = "已发送到全部频道！"
+            else:
+                send_to_channel(data_value, msg_data["value"], msg_data["type"])
+                answer = "已发送！"
+
+            requests.post(f"{API_URL}/answerCallbackQuery", json={
+                "callback_query_id": query["id"],
+                "text": answer,
+                "show_alert": False
+            })
+
+    return "ok"
+
+if __name__ == "__main__":
+    def set_webhook():
+        requests.post(f"{API_URL}/setWebhook", data={"url": WEBHOOK_URL})
+    set_webhook()
+    app.run(host="0.0.0.0", port=10000)
