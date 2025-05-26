@@ -133,7 +133,6 @@ def webhook():
 def index():
     return "Bot is running"
 
-if __name__ == "__main__":
-    init_db()
-    requests.get(f"{API_URL}/setWebhook", params={"url": f"{WEBHOOK_URL}/{TOKEN}"})
-    app.run(host="0.0.0.0", port=10000)
+# 初始化数据库并设置Webhook
+init_db()
+requests.get(f"{API_URL}/setWebhook", params={"url": f"{WEBHOOK_URL}/{TOKEN}"})
