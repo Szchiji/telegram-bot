@@ -289,7 +289,6 @@ def webhook():
 
 
 # ===== 自动设置 Webhook =====
-@app.before_first_request
 def set_webhook():
     if WEBHOOK_DOMAIN:
         url = f"{WEBHOOK_DOMAIN}/{BOT_TOKEN}"
@@ -306,4 +305,5 @@ def index():
 
 
 if __name__ == '__main__':
+    set_webhook()  # 启动时先设置 webhook
     app.run(host='0.0.0.0', port=5000)
