@@ -6,14 +6,14 @@ import requests
 TOKEN = "7660420861:AAEZDq7QVIva3aq4jEQpj-xhwdpRp7ceMdc"  # 你的机器人 Token
 ADMIN_ID = 5528758975  # 管理员 ID
 
-DATA_DIR = "data"  # 改为相对路径，当前目录下 data 文件夹
+DATA_DIR = "/tmp/data"  # Render 容器写入目录必须是 /tmp 下
 DB_PATH = os.path.join(DATA_DIR, "channels.db")
 
 app = Flask(__name__)
 API_URL = f"https://api.telegram.org/bot{TOKEN}"
 
 def init_db():
-    os.makedirs(DATA_DIR, exist_ok=True)  # 确保目录存在
+    os.makedirs(DATA_DIR, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""
