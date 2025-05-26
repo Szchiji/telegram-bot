@@ -15,7 +15,7 @@ CACHE_FILE     = os.path.join(BASE_DIR, 'message_cache.json')
 file_lock      = threading.Lock()
 
 
-# === 线程安全 JSON 读写 ===
+# === JSON 读写（线程安全） ===
 def load_json(fn, default):
     with file_lock:
         if os.path.exists(fn):
@@ -104,27 +104,29 @@ def build_buttons(msg_id):
 @app.route(f'/{BOT_TOKEN}', methods=['POST'])
 def webhook():
     data = request.get_json() or {}
+    # —— 打印全部更新到日志 —— 
+    print("🔔 收到更新:", json.dumps(data, ensure_ascii=False))
 
-    # 自动添加频道：监听 my_chat_member 更新
+    # —— 自动添加频道 —— 
     if 'my_chat_member' in data:
         mc = data['my_chat_member']
         chat = mc['chat']
         status = mc['new_chat_member']['status']
         if status in ('administrator', 'creator') and chat.get('title'):
             cid, name = chat['id'], chat['title']
-            ch = load_channels()
-            if not any(c['id']==cid for c in ch):
-                ch.append({'id':cid, 'name':name})
-                save_channels(ch)
+            channels = load_channels()
+            if not any(c['id']==cid for c in channels):
+                channels.append({'id':cid,'name':name})
+                save_channels(channels)
                 print(f"自动添加频道：{name}（{cid}）")
         return '', 200
 
-    # 普通消息 & 命令
+    # —— 普通消息 & 命令 —— 
     if 'message' in data:
         msg = data['message']
         cid = msg['chat']['id']
 
-        # 管理员命令：删除频道 / 列表
+        # 管理员命令
         if cid == ADMIN_ID and 'text' in msg:
             t = msg['text'].strip()
             if t.startswith('/delchannel'):
@@ -139,11 +141,11 @@ def webhook():
                 send_message(cid, list_channels_text())
                 return '', 200
 
-        # 非管理员不响应后续
+        # 非管理员不处理后续
         if cid != ADMIN_ID:
             return '', 200
 
-        # 缓存消息并弹按钮
+        # 缓存并弹按钮
         key = str(uuid.uuid4())[:8]
         cache = load_cache()
         if 'text' in msg:
@@ -160,7 +162,7 @@ def webhook():
         edit_buttons(cid, msg['message_id'], build_buttons(key))
         return '', 200
 
-    # 按钮回调
+    # —— 按钮回调 —— 
     if 'callback_query' in data:
         cq = data['callback_query']
         cbid = cq['id']
@@ -169,35 +171,35 @@ def webhook():
         try:
             key, dest = cq['data'].split('|')
         except:
-            answer_cb(cbid, '无效操作')
+            answer_cb(cbid,'无效操作')
             return '', 200
 
         cache = load_cache()
         m = cache.get(key)
         if not m:
-            answer_cb(cbid, '消息已失效')
+            answer_cb(cbid,'消息已失效')
             return '', 200
 
-        if dest == 'ALL':
+        if dest=='ALL':
             for c in load_channels():
                 send_media(c['id'], m)
-            answer_cb(cbid, '已发送到全部频道')
+            answer_cb(cbid,'已发送到全部频道')
         else:
             try:
                 send_media(int(dest), m)
-                answer_cb(cbid, '发送成功')
+                answer_cb(cbid,'发送成功')
             except:
-                answer_cb(cbid, '发送失败')
+                answer_cb(cbid,'发送失败')
 
-        cache.pop(key, None)
+        cache.pop(key,None)
         save_cache(cache)
-        edit_buttons(cid, mid, {'inline_keyboard': []})
+        edit_buttons(cid, mid, {'inline_keyboard':[]})
         return '', 200
 
     return '', 200
 
 
-# === 首次请求前设置 Webhook 且订阅更新 ===
+# === 首次请求前设置 Webhook 并订阅更新类型 ===
 @app.before_request
 def ensure_webhook():
     if not getattr(app, '_hooked', False) and WEBHOOK_DOMAIN:
