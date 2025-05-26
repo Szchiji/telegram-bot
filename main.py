@@ -1,117 +1,150 @@
-import json
-from fastapi import FastAPI, Request
-from telegram import Update, Bot
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler,
-    MessageHandler, ContextTypes, filters
-)
+from flask import Flask, request
+import requests, json, os, uuid
 
-# === 配置 ===
-BOT_TOKEN = "8092070129:AAGxrcDxMFniPLjNnZ4eNYd-Mtq9JBra-60"
-CHANNEL_ID = -1001763041158
-ADMIN_ID = 7848870377
-BLACKLIST_FILE = "blacklist.json"
+app = Flask(__name__)
 
-app = FastAPI()
-bot = Bot(token=BOT_TOKEN)
+# 你的机器人 Token 和管理员 ID
+BOT_TOKEN = '7660420861:AAEZDq7QVIva3aq4jEQpj-xhwdpRp7ceMdc'
+ADMIN_ID = 5528758975
+API_URL = f'https://api.telegram.org/bot{BOT_TOKEN}'
 
-# === 黑名单相关函数 ===
-def load_blacklist():
-    try:
-        with open(BLACKLIST_FILE, "r") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return []
+# 文件路径
+CHANNEL_FILE = 'channels.json'
+CACHE_FILE = 'message_cache.json'
 
-def save_blacklist(blacklist):
-    with open(BLACKLIST_FILE, "w") as f:
-        json.dump(blacklist, f)
+# 加载频道列表
+def load_channels():
+    with open(CHANNEL_FILE, 'r') as f:
+        return json.load(f)
 
-def is_blacklisted(user_id, username):
-    blacklist = load_blacklist()
-    return str(user_id) in blacklist or (username and username.lower() in blacklist)
+# 加载/保存消息缓存
+def load_cache():
+    if not os.path.exists(CACHE_FILE):
+        return {}
+    with open(CACHE_FILE, 'r') as f:
+        return json.load(f)
 
-# === 处理用户消息 ===
-async def forward_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    user_id = str(user.id)
-    username = user.username.lower() if user.username else None
+def save_cache(data):
+    with open(CACHE_FILE, 'w') as f:
+        json.dump(data, f)
 
-    if is_blacklisted(user_id, username):
-        await update.message.reply_text("您已被禁言，无法使用本 Bot。")
-        return
+# 发送消息函数
+def send_text(chat_id, text):
+    requests.post(f'{API_URL}/sendMessage', json={'chat_id': chat_id, 'text': text})
 
-    if update.message:
-        if update.message.text:
-            await bot.send_message(chat_id=CHANNEL_ID, text=update.message.text)
-        elif update.message.photo:
-            await bot.send_photo(chat_id=CHANNEL_ID, photo=update.message.photo[-1].file_id,
-                                 caption=update.message.caption or "")
-        elif update.message.video:
-            await bot.send_video(chat_id=CHANNEL_ID, video=update.message.video.file_id,
-                                 caption=update.message.caption or "")
-        elif update.message.document:
-            await bot.send_document(chat_id=CHANNEL_ID, document=update.message.document.file_id,
-                                    caption=update.message.caption or "")
+def send_photo(chat_id, file_id, caption=''):
+    requests.post(f'{API_URL}/sendPhoto', json={
+        'chat_id': chat_id,
+        'photo': file_id,
+        'caption': caption
+    })
+
+def send_video(chat_id, file_id, caption=''):
+    requests.post(f'{API_URL}/sendVideo', json={
+        'chat_id': chat_id,
+        'video': file_id,
+        'caption': caption
+    })
+
+# 主 webhook 路由
+@app.route(f'/{BOT_TOKEN}', methods=['POST'])
+def webhook():
+    data = request.get_json()
+
+    # 普通消息
+    if 'message' in data:
+        message = data['message']
+        chat_id = message['chat']['id']
+
+        if chat_id != ADMIN_ID:
+            return '', 200
+
+        msg_id = str(uuid.uuid4())[:8]
+        cache = load_cache()
+
+        if 'text' in message:
+            cache[msg_id] = {'type': 'text', 'text': message['text']}
+        elif 'photo' in message:
+            cache[msg_id] = {
+                'type': 'photo',
+                'file_id': message['photo'][-1]['file_id'],
+                'caption': message.get('caption', '')
+            }
+        elif 'video' in message:
+            cache[msg_id] = {
+                'type': 'video',
+                'file_id': message['video']['file_id'],
+                'caption': message.get('caption', '')
+            }
         else:
-            await bot.send_message(chat_id=CHANNEL_ID, text="[收到一个不支持的消息类型]")
+            send_text(chat_id, '仅支持文本、图片和视频。')
+            return '', 200
 
-# === 管理员命令 ===
-async def add_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    if not context.args:
-        await update.message.reply_text("用法：/ban 用户ID 或 @用户名")
-        return
+        save_cache(cache)
+        show_channel_buttons(chat_id, msg_id)
 
-    target = context.args[0].lower()
-    blacklist = load_blacklist()
-    if target not in blacklist:
-        blacklist.append(target)
-        save_blacklist(blacklist)
-        await update.message.reply_text(f"{target} 已加入黑名单")
-    else:
-        await update.message.reply_text(f"{target} 已在黑名单中")
+    # 按钮回调
+    elif 'callback_query' in data:
+        cq = data['callback_query']
+        chat_id = cq['message']['chat']['id']
+        msg_id, channel_id_str = cq['data'].split('|')
 
-async def remove_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-    if not context.args:
-        await update.message.reply_text("用法：/unban 用户ID 或 @用户名")
-        return
+        cache = load_cache()
+        msg = cache.get(msg_id)
 
-    target = context.args[0].lower()
-    blacklist = load_blacklist()
-    if target in blacklist:
-        blacklist.remove(target)
-        save_blacklist(blacklist)
-        await update.message.reply_text(f"{target} 已从黑名单移除")
-    else:
-        await update.message.reply_text(f"{target} 不在黑名单中")
+        if not msg:
+            requests.post(f'{API_URL}/answerCallbackQuery', json={
+                'callback_query_id': cq['id'],
+                'text': '消息已失效或未找到。'
+            })
+            return '', 200
 
-# === 初始化 Telegram 应用 ===
-application = ApplicationBuilder().token(BOT_TOKEN).build()
-application.add_handler(MessageHandler(filters.ALL & (~filters.COMMAND), forward_message))
-application.add_handler(CommandHandler("ban", add_blacklist))
-application.add_handler(CommandHandler("unban", remove_blacklist))
+        if channel_id_str == 'ALL':
+            channels = load_channels()
+            for c in channels:
+                target_id = c['id']
+                if msg['type'] == 'text':
+                    send_text(target_id, msg['text'])
+                elif msg['type'] == 'photo':
+                    send_photo(target_id, msg['file_id'], msg.get('caption', ''))
+                elif msg['type'] == 'video':
+                    send_video(target_id, msg['file_id'], msg.get('caption', ''))
+        else:
+            channel_id = int(channel_id_str)
+            if msg['type'] == 'text':
+                send_text(channel_id, msg['text'])
+            elif msg['type'] == 'photo':
+                send_photo(channel_id, msg['file_id'], msg.get('caption', ''))
+            elif msg['type'] == 'video':
+                send_video(channel_id, msg['file_id'], msg.get('caption', ''))
 
-# === Webhook 接口 ===
-@app.post("/")
-async def webhook(request: Request):
-    data = await request.json()
-    update = Update.de_json(data, bot)
-    await application.update_queue.put(update)
-    return {"ok": True}
+        del cache[msg_id]
+        save_cache(cache)
 
-# === FastAPI 启动和关闭事件 ===
-@app.on_event("startup")
-async def on_startup():
-    await application.initialize()
-    await application.start()
-    print("Bot 启动成功")
+        requests.post(f'{API_URL}/answerCallbackQuery', json={
+            'callback_query_id': cq['id'],
+            'text': '发送成功！'
+        })
 
-@app.on_event("shutdown")
-async def on_shutdown():
-    await application.stop()
-    await application.shutdown()
-    print("Bot 已关闭")
+    return '', 200
+
+# 显示频道按钮
+def show_channel_buttons(chat_id, msg_id):
+    channels = load_channels()
+    buttons = [
+        [{'text': c['name'], 'callback_data': f'{msg_id}|{c["id"]}'}] for c in channels
+    ]
+    buttons.append([{'text': '全部发送', 'callback_data': f'{msg_id}|ALL'}])
+
+    requests.post(f'{API_URL}/sendMessage', json={
+        'chat_id': chat_id,
+        'text': '请选择要发送的频道：',
+        'reply_markup': {'inline_keyboard': buttons}
+    })
+
+@app.route('/')
+def index():
+    return 'Bot is running.'
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
