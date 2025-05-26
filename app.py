@@ -2,16 +2,16 @@ import os
 import sqlite3
 from flask import Flask, request
 import requests
+import traceback
 
-TOKEN = "7660420861:AAEZDq7QVIva3aq4jEQpj-xhwdpRp7ceMdc"  # 机器人 Token，硬编码也可以
-ADMIN_ID = 5528758975  # 管理员 ID，硬编码
+TOKEN = "7660420861:AAEZDq7QVIva3aq4jEQpj-xhwdpRp7ceMdc"
+ADMIN_ID = 5528758975
 DATA_DIR = "/data"
 DB_PATH = os.path.join(DATA_DIR, "channels.db")
 
 app = Flask(__name__)
 API_URL = f"https://api.telegram.org/bot{TOKEN}"
 
-# 初始化数据库，创建频道表
 def init_db():
     os.makedirs(DATA_DIR, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
@@ -26,7 +26,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-# 获取所有频道信息
 def get_channels():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -35,7 +34,6 @@ def get_channels():
     conn.close()
     return rows
 
-# 添加频道，先尝试获取频道名称
 def add_channel(channel_id):
     resp = requests.get(f"{API_URL}/getChat", params={"chat_id": channel_id})
     if resp.status_code != 200:
@@ -44,7 +42,6 @@ def add_channel(channel_id):
     if not data.get("ok"):
         return False, data.get("description", "添加频道失败")
     title = data["result"].get("title", "未知频道")
-
     try:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
@@ -55,7 +52,6 @@ def add_channel(channel_id):
     except Exception as e:
         return False, str(e)
 
-# 删除频道
 def del_channel(channel_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -65,7 +61,6 @@ def del_channel(channel_id):
     conn.close()
     return changes > 0
 
-# 发送消息到所有频道
 def forward_to_channels(text, from_user):
     channels = get_channels()
     results = []
@@ -81,7 +76,8 @@ def forward_to_channels(text, from_user):
                 results.append((ch_id, True))
             else:
                 results.append((ch_id, False))
-        except:
+        except Exception as e:
+            print(f"转发到频道 {ch_id} 失败:", e)
             results.append((ch_id, False))
     return results
 
@@ -95,84 +91,89 @@ def send_message(chat_id, text):
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
-    update = request.get_json()
-    print("收到更新:", update)  # 方便调试日志
-
-    if not update:
-        return "ok"
-
-    message = update.get("message")
-    if not message:
-        return "ok"
-
-    chat_id = message["chat"]["id"]
-    from_user = message["from"].get("username") or message["from"].get("first_name") or "用户"
-    text = message.get("text", "")
-    if not text:
-        return "ok"
-
-    # 管理员命令处理
-    if chat_id == ADMIN_ID and text.startswith("/"):
-        parts = text.split(maxsplit=1)
-        cmd = parts[0].lower()
-        arg = parts[1].strip() if len(parts) > 1 else ""
-
-        if cmd == "/help":
-            help_text = (
-                "/help - 查看帮助\n"
-                "/addchannel <频道ID> - 添加频道，如 -1001234567890\n"
-                "/delchannel <频道ID> - 删除频道\n"
-                "/list - 查看已添加频道"
-            )
-            send_message(chat_id, help_text)
+    try:
+        update = request.get_json()
+        print("收到更新:", update)
+        if not update:
             return "ok"
 
-        elif cmd == "/addchannel":
-            if not arg:
-                send_message(chat_id, "请提供频道ID，例如 /addchannel -1001234567890")
+        message = update.get("message")
+        if not message:
+            return "ok"
+
+        chat_id = message["chat"]["id"]
+        from_user = message["from"].get("username") or message["from"].get("first_name") or "用户"
+        text = message.get("text", "")
+        if not text:
+            return "ok"
+
+        if chat_id == ADMIN_ID and text.startswith("/"):
+            parts = text.split(maxsplit=1)
+            cmd = parts[0].lower()
+            arg = parts[1].strip() if len(parts) > 1 else ""
+
+            if cmd == "/help":
+                help_text = (
+                    "/help - 查看帮助\n"
+                    "/addchannel <频道ID> - 添加频道，如 -1001234567890\n"
+                    "/delchannel <频道ID> - 删除频道\n"
+                    "/list - 查看已添加频道"
+                )
+                send_message(chat_id, help_text)
                 return "ok"
-            ok, msg = add_channel(arg)
-            if ok:
-                send_message(chat_id, f"成功添加频道：{msg} ({arg})")
-            else:
-                send_message(chat_id, f"添加失败：{msg}")
-            return "ok"
 
-        elif cmd == "/delchannel":
-            if not arg:
-                send_message(chat_id, "请提供频道ID，例如 /delchannel -1001234567890")
+            elif cmd == "/addchannel":
+                if not arg:
+                    send_message(chat_id, "请提供频道ID，例如 /addchannel -1001234567890")
+                    return "ok"
+                ok, msg = add_channel(arg)
+                if ok:
+                    send_message(chat_id, f"成功添加频道：{msg} ({arg})")
+                else:
+                    send_message(chat_id, f"添加失败：{msg}")
                 return "ok"
-            ok = del_channel(arg)
-            if ok:
-                send_message(chat_id, f"已删除频道：{arg}")
+
+            elif cmd == "/delchannel":
+                if not arg:
+                    send_message(chat_id, "请提供频道ID，例如 /delchannel -1001234567890")
+                    return "ok"
+                ok = del_channel(arg)
+                if ok:
+                    send_message(chat_id, f"已删除频道：{arg}")
+                else:
+                    send_message(chat_id, f"频道不存在或删除失败：{arg}")
+                return "ok"
+
+            elif cmd == "/list":
+                channels = get_channels()
+                if not channels:
+                    send_message(chat_id, "频道列表为空。")
+                else:
+                    lines = ["已添加频道列表："]
+                    for cid, title in channels:
+                        lines.append(f"{title} ({cid})")
+                    send_message(chat_id, "\n".join(lines))
+                return "ok"
+
             else:
-                send_message(chat_id, f"频道不存在或删除失败：{arg}")
-            return "ok"
+                send_message(chat_id, "未知命令，请发送 /help 查看帮助。")
+                return "ok"
 
-        elif cmd == "/list":
-            channels = get_channels()
-            if not channels:
-                send_message(chat_id, "频道列表为空。")
-            else:
-                lines = ["已添加频道列表："]
-                for cid, title in channels:
-                    lines.append(f"{title} ({cid})")
-                send_message(chat_id, "\n".join(lines))
-            return "ok"
+        # 普通用户消息转发
+        forward_results = forward_to_channels(text, from_user)
+        ok_count = sum(1 for _, ok in forward_results if ok)
+        fail_count = len(forward_results) - ok_count
+        send_message(chat_id, f"消息已转发到 {ok_count} 个频道，失败 {fail_count} 个频道。")
 
-        else:
-            send_message(chat_id, "未知命令，请发送 /help 查看帮助。")
-            return "ok"
+        return "ok"
 
-    # 普通用户消息，转发到所有频道
-    forward_results = forward_to_channels(text, from_user)
-    ok_count = sum(1 for _, ok in forward_results if ok)
-    fail_count = len(forward_results) - ok_count
-    send_message(chat_id, f"消息已转发到 {ok_count} 个频道，失败 {fail_count} 个频道。")
-
-    return "ok"
+    except Exception as e:
+        print("处理请求异常:", e)
+        traceback.print_exc()
+        return "ok"
 
 if __name__ == "__main__":
     init_db()
     port = int(os.environ.get("PORT", "10000"))
+    print(f"启动 Flask 监听端口 {port}，Webhook 路径 /{TOKEN}")
     app.run(host="0.0.0.0", port=port)
