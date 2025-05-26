@@ -1,20 +1,20 @@
 import os
 import sqlite3
-from flask import Flask, request
+from flask import Flask, request, jsonify
 import requests
 
-TOKEN = "7660420861:AAEZDq7QVIva3aq4jEQpj-xhwdpRp7ceMdc"  # 你的机器人 Token
-ADMIN_ID = 5528758975  # 管理员 ID
+TOKEN = "7660420861:AAEZDq7QVIva3aq4jEQpj-xhwdpRp7ceMdc"
+ADMIN_ID = 5528758975
 
-DATA_DIR = "/tmp/data"  # Render 容器写入目录必须是 /tmp 下
+DATA_DIR = "/tmp/data"
+os.makedirs(DATA_DIR, exist_ok=True)
 DB_PATH = os.path.join(DATA_DIR, "channels.db")
 
 app = Flask(__name__)
 API_URL = f"https://api.telegram.org/bot{TOKEN}"
 
 def init_db():
-    os.makedirs(DATA_DIR, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     c = conn.cursor()
     c.execute("""
         CREATE TABLE IF NOT EXISTS channels (
@@ -27,7 +27,7 @@ def init_db():
     conn.close()
 
 def get_channels():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     c = conn.cursor()
     c.execute("SELECT channel_id, channel_title FROM channels")
     rows = c.fetchall()
@@ -44,7 +44,7 @@ def add_channel(channel_id):
     title = data["result"].get("title", "未知频道")
 
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=10)
         c = conn.cursor()
         c.execute("INSERT OR IGNORE INTO channels (channel_id, channel_title) VALUES (?, ?)", (channel_id, title))
         conn.commit()
@@ -54,7 +54,7 @@ def add_channel(channel_id):
         return False, str(e)
 
 def del_channel(channel_id):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     c = conn.cursor()
     c.execute("DELETE FROM channels WHERE channel_id=?", (channel_id,))
     conn.commit()
@@ -73,30 +73,27 @@ def forward_to_channels(text, from_user):
                 "text": send_text,
                 "parse_mode": "HTML"
             })
-            if r.status_code == 200:
-                results.append((ch_id, True))
-            else:
-                results.append((ch_id, False))
-        except:
+            results.append((ch_id, r.status_code == 200))
+        except Exception:
             results.append((ch_id, False))
     return results
 
-@app.route(f"/{TOKEN}", methods=["POST"])  # Webhook 路径是 /TOKEN
+@app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     update = request.get_json()
     if not update:
-        return "ok"
+        return jsonify({"status": "no update"}), 200
 
     message = update.get("message")
     if not message:
-        return "ok"
+        return jsonify({"status": "no message"}), 200
 
     chat_id = message["chat"]["id"]
     from_user = message["from"].get("username") or message["from"].get("first_name") or "用户"
 
     text = message.get("text", "")
     if not text:
-        return "ok"
+        return jsonify({"status": "no text"}), 200
 
     if chat_id == ADMIN_ID and text.startswith("/"):
         parts = text.split(maxsplit=1)
@@ -111,29 +108,29 @@ def webhook():
                 "/list - 查看已添加频道"
             )
             send_message(chat_id, help_text)
-            return "ok"
+            return jsonify({"status": "ok"}), 200
 
         elif cmd == "/addchannel":
             if not arg:
                 send_message(chat_id, "请提供频道ID，例如 /addchannel -1001234567890")
-                return "ok"
+                return jsonify({"status": "ok"}), 200
             ok, msg = add_channel(arg)
             if ok:
                 send_message(chat_id, f"成功添加频道：{msg} ({arg})")
             else:
                 send_message(chat_id, f"添加失败：{msg}")
-            return "ok"
+            return jsonify({"status": "ok"}), 200
 
         elif cmd == "/delchannel":
             if not arg:
                 send_message(chat_id, "请提供频道ID，例如 /delchannel -1001234567890")
-                return "ok"
+                return jsonify({"status": "ok"}), 200
             ok = del_channel(arg)
             if ok:
                 send_message(chat_id, f"已删除频道：{arg}")
             else:
                 send_message(chat_id, f"频道不存在或删除失败：{arg}")
-            return "ok"
+            return jsonify({"status": "ok"}), 200
 
         elif cmd == "/list":
             channels = get_channels()
@@ -144,11 +141,11 @@ def webhook():
                 for cid, title in channels:
                     lines.append(f"{title} ({cid})")
                 send_message(chat_id, "\n".join(lines))
-            return "ok"
+            return jsonify({"status": "ok"}), 200
 
         else:
             send_message(chat_id, "未知命令，请发送 /help 查看帮助。")
-            return "ok"
+            return jsonify({"status": "ok"}), 200
 
     # 普通用户消息，转发到所有频道
     forward_results = forward_to_channels(text, from_user)
@@ -156,12 +153,16 @@ def webhook():
     fail_count = len(forward_results) - ok_count
     send_message(chat_id, f"消息已转发到 {ok_count} 个频道，失败 {fail_count} 个频道。")
 
-    return "ok"
+    return jsonify({"status": "ok"}), 200
 
 def send_message(chat_id, text):
-    requests.post(f"{API_URL}/sendMessage", json={"chat_id": chat_id, "text": text})
+    try:
+        requests.post(f"{API_URL}/sendMessage", json={"chat_id": chat_id, "text": text})
+    except Exception as e:
+        print("发送消息失败:", e)
+
+init_db()
 
 if __name__ == "__main__":
-    init_db()
     port = int(os.environ.get("PORT", "10000"))
     app.run(host="0.0.0.0", port=port)
