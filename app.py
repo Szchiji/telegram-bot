@@ -32,20 +32,38 @@ def send_to_channel(channel_id, content, content_type):
         "chat_id": int(channel_id),
         "disable_notification": True
     }
+
     if content_type == "text":
         payload["text"] = content
-        requests.post(f"{API_URL}/sendMessage", json=payload)
+        url = f"{API_URL}/sendMessage"
     elif content_type == "photo":
         payload["photo"] = content
-        requests.post(f"{API_URL}/sendPhoto", json=payload)
+        url = f"{API_URL}/sendPhoto"
     elif content_type == "video":
         payload["video"] = content
-        requests.post(f"{API_URL}/sendVideo", json=payload)
+        url = f"{API_URL}/sendVideo"
+    else:
+        return
+
+    response = requests.post(url, json=payload)
+    result = response.json()
+
+    # 自动移除失效频道
+    if not result.get("ok"):
+        desc = result.get("description", "")
+        if "chat not found" in desc or "not enough rights" in desc:
+            with open(CHANNELS_FILE, "r") as f:
+                channels = json.load(f)
+            if str(channel_id) in channels:
+                del channels[str(channel_id)]
+                with open(CHANNELS_FILE, "w") as f:
+                    json.dump(channels, f)
 
 @app.route("/", methods=["POST"])
 def webhook():
     data = request.json
 
+    # 记录新加入频道
     if "my_chat_member" in data:
         chat = data["my_chat_member"]["chat"]
         new_status = data["my_chat_member"]["new_chat_member"]["status"]
@@ -53,6 +71,7 @@ def webhook():
             save_channel(chat["id"], chat["title"])
         return "ok"
 
+    # 处理消息
     if "message" in data:
         msg = data["message"]
         user_id = msg["from"]["id"]
@@ -60,24 +79,20 @@ def webhook():
         if user_id != ADMIN_ID:
             return "not admin"
 
-        if "text" in msg:
-            if msg["text"] == "/help":
-                help_text = (
-                    "发送文字、图片或视频后，机器人会弹出频道选择按钮。\n"
-                    "点击频道按钮，即可匿名转发到该频道。\n"
-                    "也可以点击“全部频道”转发给所有频道。\n\n"
-                    "当前支持：\n"
-                    "- 中文频道按钮\n"
-                    "- 自动记录频道\n"
-                    "- 一键多频道群发\n"
-                    "- /help 命令"
-                )
-                requests.post(f"{API_URL}/sendMessage", json={
-                    "chat_id": ADMIN_ID,
-                    "text": help_text
-                })
-                return "ok"
+        if "text" in msg and msg["text"] == "/help":
+            help_text = (
+                "发送文字、图片或视频后，机器人会弹出频道选择按钮。\n"
+                "点击频道按钮即可匿名转发。\n"
+                "点击“全部频道”将同时发送到所有频道。\n\n"
+                "支持：频道中文名、频道自动记录、多频道群发、/help 指令。"
+            )
+            requests.post(f"{API_URL}/sendMessage", json={
+                "chat_id": ADMIN_ID,
+                "text": help_text
+            })
+            return "ok"
 
+        # 记录内容
         content_type, content_value = None, None
         if "text" in msg:
             content_type = "text"
@@ -97,6 +112,7 @@ def webhook():
                 "value": content_value
             }, f)
 
+        # 显示频道按钮
         channels = get_channels()
         buttons = [[{"text": v, "callback_data": k}] for k, v in channels.items()]
         if buttons:
@@ -108,6 +124,7 @@ def webhook():
             "reply_markup": {"inline_keyboard": buttons}
         })
 
+    # 处理按钮点击
     elif "callback_query" in data:
         query = data["callback_query"]
         user_id = query["from"]["id"]
@@ -122,7 +139,7 @@ def webhook():
 
             if data_value == "ALL_CHANNELS":
                 channels = get_channels()
-                for cid in channels.keys():
+                for cid in list(channels.keys()):
                     send_to_channel(cid, msg_data["value"], msg_data["type"])
                 answer = "已发送到全部频道！"
             else:
@@ -139,7 +156,6 @@ def webhook():
 
 if __name__ == "__main__":
     def set_webhook():
-        url = f"{API_URL}/setWebhook"
-        requests.post(url, data={"url": WEBHOOK_URL})
+        requests.post(f"{API_URL}/setWebhook", data={"url": WEBHOOK_URL})
     set_webhook()
     app.run(host="0.0.0.0", port=10000)
