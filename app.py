@@ -28,26 +28,19 @@ def get_channels():
         return json.load(f)
 
 def send_to_channel(channel_id, content, content_type):
+    payload = {
+        "chat_id": int(channel_id),
+        "disable_notification": True
+    }
     if content_type == "text":
-        requests.post(f"{API_URL}/sendMessage", json={
-            "chat_id": channel_id,
-            "text": content,
-            "disable_notification": True
-        })
+        payload["text"] = content
+        requests.post(f"{API_URL}/sendMessage", json=payload)
     elif content_type == "photo":
-        requests.post(f"{API_URL}/sendPhoto", json={
-            "chat_id": channel_id,
-            "photo": content,
-            "caption": "",
-            "disable_notification": True
-        })
+        payload["photo"] = content
+        requests.post(f"{API_URL}/sendPhoto", json=payload)
     elif content_type == "video":
-        requests.post(f"{API_URL}/sendVideo", json={
-            "chat_id": channel_id,
-            "video": content,
-            "caption": "",
-            "disable_notification": True
-        })
+        payload["video"] = content
+        requests.post(f"{API_URL}/sendVideo", json=payload)
 
 @app.route("/", methods=["POST"])
 def webhook():
@@ -67,14 +60,8 @@ def webhook():
         if user_id != ADMIN_ID:
             return "not admin"
 
-        msg_id = msg["message_id"]
-        content_type = None
-        content_value = None
-
         if "text" in msg:
-            text = msg["text"]
-
-            if text == "/help":
+            if msg["text"] == "/help":
                 help_text = (
                     "发送文字、图片或视频后，机器人会弹出频道选择按钮。\n"
                     "点击频道按钮，即可匿名转发到该频道。\n"
@@ -91,9 +78,10 @@ def webhook():
                 })
                 return "ok"
 
+        content_type, content_value = None, None
+        if "text" in msg:
             content_type = "text"
-            content_value = text
-
+            content_value = msg["text"]
         elif "photo" in msg:
             content_type = "photo"
             content_value = msg["photo"][-1]["file_id"]
@@ -111,7 +99,8 @@ def webhook():
 
         channels = get_channels()
         buttons = [[{"text": v, "callback_data": k}] for k, v in channels.items()]
-        buttons.append([{"text": "全部频道", "callback_data": "ALL_CHANNELS"}])
+        if buttons:
+            buttons.append([{"text": "全部频道", "callback_data": "ALL_CHANNELS"}])
 
         requests.post(f"{API_URL}/sendMessage", json={
             "chat_id": ADMIN_ID,
@@ -132,7 +121,8 @@ def webhook():
                 msg_data = json.load(f)
 
             if data_value == "ALL_CHANNELS":
-                for cid in get_channels().keys():
+                channels = get_channels()
+                for cid in channels.keys():
                     send_to_channel(cid, msg_data["value"], msg_data["type"])
                 answer = "已发送到全部频道！"
             else:
