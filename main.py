@@ -3,24 +3,23 @@ import requests, json, os, uuid
 
 app = Flask(__name__)
 
-# === 配置区 ===
-BOT_TOKEN = '7660420861:AAEZDq7QVIva3aq4jEQpj-xhwdpRp7ceMdc'  # 你的机器人 Token
-ADMIN_ID = 5528758975  # 管理员用户 ID
+# === 配置区（使用环境变量）===
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+ADMIN_ID = int(os.getenv('ADMIN_ID'))
+WEBHOOK_DOMAIN = os.getenv('WEBHOOK_DOMAIN')  # e.g. https://telegram-bot-329q.onrender.com
 API_URL = f'https://api.telegram.org/bot{BOT_TOKEN}'
 
-# 文件路径
-CHANNEL_FILE = 'channels.json'         # 存储频道列表
-CACHE_FILE = 'message_cache.json'      # 缓存未发送的消息
+CHANNEL_FILE = 'channels.json'
+CACHE_FILE = 'message_cache.json'
 
 
-# 加载频道列表
+# ===== 工具函数 =====
 def load_channels():
     if not os.path.exists(CHANNEL_FILE):
         return []
     with open(CHANNEL_FILE, 'r', encoding='utf-8') as f:
         return json.load(f)
 
-# 加载/保存消息缓存
 def load_cache():
     if not os.path.exists(CACHE_FILE):
         return {}
@@ -31,7 +30,6 @@ def save_cache(data):
     with open(CACHE_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-# 发送消息函数
 def send_text(chat_id, text):
     requests.post(f'{API_URL}/sendMessage', json={'chat_id': chat_id, 'text': text})
 
@@ -49,7 +47,6 @@ def send_video(chat_id, file_id, caption=''):
         'caption': caption
     })
 
-# 显示频道按钮
 def show_channel_buttons(chat_id, msg_id):
     channels = load_channels()
     buttons = [
@@ -63,6 +60,8 @@ def show_channel_buttons(chat_id, msg_id):
         'reply_markup': {'inline_keyboard': buttons}
     })
 
+
+# ===== Webhook 主处理 =====
 @app.route(f'/{BOT_TOKEN}', methods=['POST'])
 def webhook():
     data = request.get_json()
@@ -71,17 +70,14 @@ def webhook():
         message = data['message']
         chat_id = message['chat']['id']
 
-        # 管理员命令处理
         if chat_id == ADMIN_ID and 'text' in message:
             text = message['text']
 
-            # /addchannel 命令
             if text.startswith('/addchannel'):
                 parts = text.split()
                 if len(parts) == 2:
-                    channel_id_str = parts[1]
                     try:
-                        channel_id = int(channel_id_str)
+                        channel_id = int(parts[1])
                     except:
                         send_text(chat_id, '频道ID格式错误，必须是数字。')
                         return '', 200
@@ -178,9 +174,20 @@ def webhook():
 
     return '', 200
 
+
+# ===== 自动设置 Webhook（使用环境变量）=====
+@app.before_first_request
+def set_webhook():
+    if WEBHOOK_DOMAIN:
+        url = f"{WEBHOOK_DOMAIN}/{BOT_TOKEN}"
+        res = requests.get(f"{API_URL}/setWebhook", params={'url': url})
+        print('Webhook 设置结果:', res.json())
+
+
 @app.route('/')
 def index():
     return 'Bot is running.'
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
