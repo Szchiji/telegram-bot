@@ -1,92 +1,95 @@
 import sqlite3
 from flask import Flask, request
 from telegram import Bot, Update
-from telegram.ext import Dispatcher, CommandHandler, MessageHandler, Filters
+from telegram.ext import Dispatcher, CommandHandler, MessageHandler, filters
+
+BOT_TOKEN = "7660420861:AAEZDq7QVIva3aq4jEQpj-xhwdpRp7ceMdc"
+ADMIN_ID = 5528758975  # 你的 Telegram 用户 ID
+WEBHOOK_PATH = f"/{BOT_TOKEN}"
+WEBHOOK_URL = "https://telegram-bot-329q.onrender.com" + WEBHOOK_PATH
 
 app = Flask(__name__)
+bot = Bot(BOT_TOKEN)
+dispatcher = Dispatcher(bot, None, workers=2, use_context=True)
 
-BOT_TOKEN = '7660420861:AAEZDq7QVIva3aq4jEQpj-xhwdpRp7ceMdc'
-ADMIN_IDS = {5528758975}
-
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(bot, None, workers=0)
-
-DB_PATH = 'channels.db'
-
-# 初始化数据库，创建频道表
+# --- SQLite数据库相关 ---
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
+    conn = sqlite3.connect("channels.db")
+    c = conn.cursor()
+    c.execute("""
         CREATE TABLE IF NOT EXISTS channels (
-            channel_id INTEGER PRIMARY KEY
+            channel_id TEXT PRIMARY KEY
         )
-    ''')
+    """)
     conn.commit()
     conn.close()
-
-init_db()
-
-def is_admin(user_id):
-    return user_id in ADMIN_IDS
 
 def add_channel(channel_id):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('INSERT OR IGNORE INTO channels(channel_id) VALUES(?)', (channel_id,))
+    conn = sqlite3.connect("channels.db")
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO channels (channel_id) VALUES (?)", (str(channel_id),))
     conn.commit()
     conn.close()
 
-def get_all_channels():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT channel_id FROM channels')
-    rows = cursor.fetchall()
+def get_channels():
+    conn = sqlite3.connect("channels.db")
+    c = conn.cursor()
+    c.execute("SELECT channel_id FROM channels")
+    rows = c.fetchall()
     conn.close()
     return [row[0] for row in rows]
 
-# 管理员广播命令
+# --- 机器人命令处理 ---
+def start(update, context):
+    update.message.reply_text("欢迎！本机器人管理员可使用 /broadcast <消息> 向所有频道发送消息。")
+
 def broadcast(update, context):
     user_id = update.effective_user.id
-    if not is_admin(user_id):
-        update.message.reply_text("您没有权限执行此命令。")
+    if user_id != ADMIN_ID:
+        update.message.reply_text("只有管理员可以使用此命令。")
         return
 
-    text = update.message.text
-    parts = text.split(' ', 1)
-    if len(parts) < 2 or not parts[1].strip():
-        update.message.reply_text("请在命令后输入要广播的消息内容。")
+    text = " ".join(context.args)
+    if not text:
+        update.message.reply_text("请在 /broadcast 后输入消息内容。")
         return
 
-    message = parts[1].strip()
-    channels = get_all_channels()
+    channels = get_channels()
     success_count = 0
     fail_count = 0
-
-    for channel_id in channels:
+    for ch_id in channels:
         try:
-            bot.send_message(chat_id=channel_id, text=message)
+            bot.send_message(chat_id=ch_id, text=text)
             success_count += 1
         except Exception as e:
-            print(f"向频道 {channel_id} 发送消息失败: {e}")
             fail_count += 1
 
-    update.message.reply_text(f"广播完成，成功：{success_count} 个频道，失败：{fail_count} 个频道。")
+    update.message.reply_text(f"消息已发送到 {success_count} 个频道，失败 {fail_count} 个。")
 
-# 监听频道消息，自动保存频道ID
-def channel_post_handler(update, context):
+def channel_join(update, context):
     chat = update.effective_chat
-    if chat.type == 'channel':
+    if chat.type in ["channel", "supergroup", "group"]:
         add_channel(chat.id)
 
-dp.add_handler(CommandHandler("broadcast", broadcast))
-dp.add_handler(MessageHandler(Filters.chat_type.channel, channel_post_handler))
+# --- 设置命令处理器 ---
+dispatcher.add_handler(CommandHandler("start", start))
+dispatcher.add_handler(CommandHandler("broadcast", broadcast))
+dispatcher.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, channel_join))
+dispatcher.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, channel_join))
 
-@app.route(f'/{BOT_TOKEN}', methods=['POST'])
+# --- Flask路由 ---
+@app.route(WEBHOOK_PATH, methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), bot)
-    dp.process_update(update)
-    return 'ok'
+    dispatcher.process_update(update)
+    return "OK"
 
-if __name__ == '__main__':
-    app.run(port=5000)
+@app.route("/")
+def index():
+    return "Bot is running."
+
+if __name__ == "__main__":
+    init_db()
+    bot.delete_webhook()
+    bot.set_webhook(WEBHOOK_URL)
+    app.run(host="0.0.0.0", port=10000)
