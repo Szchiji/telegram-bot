@@ -104,10 +104,9 @@ def build_buttons(msg_id):
 @app.route(f'/{BOT_TOKEN}', methods=['POST'])
 def webhook():
     data = request.get_json() or {}
-    # —— 打印全部更新到日志 —— 
     print("🔔 收到更新:", json.dumps(data, ensure_ascii=False))
 
-    # —— 自动添加频道 —— 
+    # 自动添加频道
     if 'my_chat_member' in data:
         mc = data['my_chat_member']
         chat = mc['chat']
@@ -121,7 +120,7 @@ def webhook():
                 print(f"自动添加频道：{name}（{cid}）")
         return '', 200
 
-    # —— 普通消息 & 命令 —— 
+    # 普通消息 & 命令
     if 'message' in data:
         msg = data['message']
         cid = msg['chat']['id']
@@ -162,7 +161,7 @@ def webhook():
         edit_buttons(cid, msg['message_id'], build_buttons(key))
         return '', 200
 
-    # —— 按钮回调 —— 
+    # 按钮回调
     if 'callback_query' in data:
         cq = data['callback_query']
         cbid = cq['id']
@@ -197,23 +196,6 @@ def webhook():
         return '', 200
 
     return '', 200
-
-
-# === 首次请求前设置 Webhook 并订阅更新类型 ===
-@app.before_request
-def ensure_webhook():
-    if not getattr(app, '_hooked', False) and WEBHOOK_DOMAIN:
-        url = f"{WEBHOOK_DOMAIN}/{BOT_TOKEN}"
-        res = requests.post(
-            f"{API_URL}/setWebhook",
-            data={
-                'url': url,
-                'allowed_updates': json.dumps(['message','callback_query','my_chat_member'])
-            },
-            timeout=10
-        )
-        print('Webhook 设置结果:', res.json())
-        app._hooked = True
 
 
 @app.route('/')
