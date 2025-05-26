@@ -1,3 +1,2 @@
-python-telegram-bot==20.7
-fastapi==0.110.1
-uvicorn==0.29.0
+Flask
+requests
