@@ -1,16 +1,29 @@
 import os
 import sqlite3
-from flask import Flask, request, jsonify
+import threading
+from flask import Flask, request
 import requests
 
-TOKEN = "7660420861:AAEZDq7QVIva3aq4jEQpj-xhwdpRp7ceMdc"  # 你的机器人 Token
-ADMIN_ID = 5528758975  # 管理员 ID
+TOKEN = "7660420861:AAEZDq7QVIva3aq4jEQpj-xhwdpRp7ceMdc"
+ADMIN_ID = 5528758975
 
-DATA_DIR = "data"  # 相对路径，项目根目录下
+DATA_DIR = "data"
 DB_PATH = os.path.join(DATA_DIR, "channels.db")
+API_URL = f"https://api.telegram.org/bot{TOKEN}"
 
 app = Flask(__name__)
-API_URL = f"https://api.telegram.org/bot{TOKEN}"
+
+# 内存缓存用户消息（线程安全）
+message_cache = {}
+cache_lock = threading.Lock()
+
+def cache_message(msg_id, from_user, text):
+    with cache_lock:
+        message_cache[msg_id] = {"from_user": from_user, "text": text}
+
+def pop_message(msg_id):
+    with cache_lock:
+        return message_cache.pop(msg_id, None)
 
 def init_db():
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -66,7 +79,9 @@ def send_message(chat_id, text, reply_markup=None):
     data = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
     if reply_markup:
         data["reply_markup"] = reply_markup
-    requests.post(f"{API_URL}/sendMessage", json=data)
+    resp = requests.post(f"{API_URL}/sendMessage", json=data)
+    print(f"send_message to {chat_id}, status: {resp.status_code}")
+    return resp.status_code == 200
 
 def forward_to_channel(channel_id, text, from_user):
     send_text = f"【匿名转发】\n{from_user} 发送:\n\n{text}"
@@ -75,43 +90,49 @@ def forward_to_channel(channel_id, text, from_user):
         "text": send_text,
         "parse_mode": "HTML"
     })
+    print(f"forward_to_channel {channel_id} status: {r.status_code}")
     return r.status_code == 200
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     update = request.get_json()
+    print("收到更新:", update)
+
     if not update:
         return "ok"
 
-    message = update.get("message")
     callback_query = update.get("callback_query")
-
-    # 处理按钮回调
     if callback_query:
         from_user_id = callback_query["from"]["id"]
         if from_user_id != ADMIN_ID:
-            # 非管理员禁止操作
-            return jsonify({"text": "无权限操作"}), 200
+            # 非管理员操作回绝
+            return "ok"
 
         data = callback_query.get("data", "")
-        # data格式：sendto:<channel_id>:<original_user>:<message_text>
         if data.startswith("sendto:"):
-            parts = data.split(":", 3)
-            if len(parts) == 4:
-                _, channel_id, from_user, text = parts
-                ok = forward_to_channel(channel_id, text, from_user)
+            # 格式 sendto:<channel_id>:<msg_id>
+            parts = data.split(":")
+            if len(parts) == 3:
+                _, channel_id, msg_id = parts
+                cached = pop_message(msg_id)
+                if not cached:
+                    requests.post(f"{API_URL}/answerCallbackQuery", json={
+                        "callback_query_id": callback_query["id"],
+                        "text": "消息已过期或不存在",
+                        "show_alert": True
+                    })
+                    return "ok"
+                ok = forward_to_channel(channel_id, cached["text"], cached["from_user"])
                 answer_text = "发送成功" if ok else "发送失败"
-                # 回复回调
                 requests.post(f"{API_URL}/answerCallbackQuery", json={
                     "callback_query_id": callback_query["id"],
                     "text": answer_text,
                     "show_alert": False
                 })
-                # 同时给管理员发确认消息
                 send_message(ADMIN_ID, f"消息已转发到频道 {channel_id}，结果：{answer_text}")
-                return "ok"
-        return "ok"
+            return "ok"
 
+    message = update.get("message")
     if not message:
         return "ok"
 
@@ -119,7 +140,7 @@ def webhook():
     from_user = message["from"].get("username") or message["from"].get("first_name") or "用户"
     text = message.get("text", "")
 
-    # 仅管理员可用命令
+    # 管理员命令处理
     if chat_id == ADMIN_ID and text.startswith("/"):
         parts = text.split(maxsplit=1)
         cmd = parts[0].lower()
@@ -172,21 +193,18 @@ def webhook():
             send_message(chat_id, "未知命令，请发送 /help 查看帮助。")
             return "ok"
 
-    # 普通用户发送消息，管理员收到选择按钮，管理员点击后转发
+    # 普通用户消息处理
     channels = get_channels()
     if not channels:
         send_message(chat_id, "暂无可转发的频道，请联系管理员添加频道。")
         return "ok"
 
-    # 构建选择频道的按钮
+    msg_id = f"{chat_id}_{message['message_id']}"
+    cache_message(msg_id, from_user, text)
+
     buttons = []
     for ch_id, ch_title in channels:
-        # callback_data 格式： sendto:<channel_id>:<from_user>:<text>
-        # 注意 text 可能过长或包含特殊字符，需要处理，比如简化或限制长度
-        safe_text = text.replace("\n", " ").replace(":", " ").strip()
-        if len(safe_text) > 50:
-            safe_text = safe_text[:47] + "..."
-        callback_data = f"sendto:{ch_id}:{from_user}:{safe_text}"
+        callback_data = f"sendto:{ch_id}:{msg_id}"
         buttons.append([{"text": ch_title, "callback_data": callback_data}])
 
     reply_markup = {"inline_keyboard": buttons}
