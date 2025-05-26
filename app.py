@@ -3,14 +3,15 @@ import sqlite3
 from flask import Flask, request
 import requests
 
-TOKEN = os.getenv("TOKEN")  # 机器人Token
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))  # 管理员ID
-DATA_DIR = os.getenv("DATA_DIR", "/data")
+TOKEN = "7660420861:AAEZDq7QVIva3aq4jEQpj-xhwdpRp7ceMdc"  # 机器人 Token，硬编码也可以
+ADMIN_ID = 5528758975  # 管理员 ID，硬编码
+DATA_DIR = "/data"
 DB_PATH = os.path.join(DATA_DIR, "channels.db")
 
 app = Flask(__name__)
 API_URL = f"https://api.telegram.org/bot{TOKEN}"
 
+# 初始化数据库，创建频道表
 def init_db():
     os.makedirs(DATA_DIR, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
@@ -25,6 +26,7 @@ def init_db():
     conn.commit()
     conn.close()
 
+# 获取所有频道信息
 def get_channels():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -33,6 +35,7 @@ def get_channels():
     conn.close()
     return rows
 
+# 添加频道，先尝试获取频道名称
 def add_channel(channel_id):
     resp = requests.get(f"{API_URL}/getChat", params={"chat_id": channel_id})
     if resp.status_code != 200:
@@ -52,6 +55,7 @@ def add_channel(channel_id):
     except Exception as e:
         return False, str(e)
 
+# 删除频道
 def del_channel(channel_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -61,6 +65,7 @@ def del_channel(channel_id):
     conn.close()
     return changes > 0
 
+# 发送消息到所有频道
 def forward_to_channels(text, from_user):
     channels = get_channels()
     results = []
@@ -72,17 +77,27 @@ def forward_to_channels(text, from_user):
                 "text": send_text,
                 "parse_mode": "HTML"
             })
-            results.append((ch_id, r.status_code == 200))
+            if r.status_code == 200:
+                results.append((ch_id, True))
+            else:
+                results.append((ch_id, False))
         except:
             results.append((ch_id, False))
     return results
 
 def send_message(chat_id, text):
-    requests.post(f"{API_URL}/sendMessage", json={"chat_id": chat_id, "text": text})
+    try:
+        resp = requests.post(f"{API_URL}/sendMessage", json={"chat_id": chat_id, "text": text})
+        return resp.status_code == 200
+    except Exception as e:
+        print("发送消息失败:", e)
+        return False
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     update = request.get_json()
+    print("收到更新:", update)  # 方便调试日志
+
     if not update:
         return "ok"
 
@@ -96,6 +111,7 @@ def webhook():
     if not text:
         return "ok"
 
+    # 管理员命令处理
     if chat_id == ADMIN_ID and text.startswith("/"):
         parts = text.split(maxsplit=1)
         cmd = parts[0].lower()
@@ -158,5 +174,5 @@ def webhook():
 
 if __name__ == "__main__":
     init_db()
-    port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", "10000"))
     app.run(host="0.0.0.0", port=port)
