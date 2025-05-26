@@ -3,30 +3,33 @@ import requests, json, os, uuid
 
 app = Flask(__name__)
 
-# 你的机器人 Token 和管理员 ID
-BOT_TOKEN = '7660420861:AAEZDq7QVIva3aq4jEQpj-xhwdpRp7ceMdc'
-ADMIN_ID = 5528758975
+# === 配置区 ===
+BOT_TOKEN = '7660420861:AAEZDq7QVIva3aq4jEQpj-xhwdpRp7ceMdc'  # 你的机器人 Token
+ADMIN_ID = 5528758975  # 管理员用户 ID
 API_URL = f'https://api.telegram.org/bot{BOT_TOKEN}'
 
 # 文件路径
-CHANNEL_FILE = 'channels.json'
-CACHE_FILE = 'message_cache.json'
+CHANNEL_FILE = 'channels.json'         # 存储频道列表
+CACHE_FILE = 'message_cache.json'      # 缓存未发送的消息
+
 
 # 加载频道列表
 def load_channels():
-    with open(CHANNEL_FILE, 'r') as f:
+    if not os.path.exists(CHANNEL_FILE):
+        return []
+    with open(CHANNEL_FILE, 'r', encoding='utf-8') as f:
         return json.load(f)
 
 # 加载/保存消息缓存
 def load_cache():
     if not os.path.exists(CACHE_FILE):
         return {}
-    with open(CACHE_FILE, 'r') as f:
+    with open(CACHE_FILE, 'r', encoding='utf-8') as f:
         return json.load(f)
 
 def save_cache(data):
-    with open(CACHE_FILE, 'w') as f:
-        json.dump(data, f)
+    with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 # 发送消息函数
 def send_text(chat_id, text):
@@ -46,15 +49,64 @@ def send_video(chat_id, file_id, caption=''):
         'caption': caption
     })
 
-# 主 webhook 路由
+# 显示频道按钮
+def show_channel_buttons(chat_id, msg_id):
+    channels = load_channels()
+    buttons = [
+        [{'text': c['name'], 'callback_data': f'{msg_id}|{c["id"]}'}] for c in channels
+    ]
+    buttons.append([{'text': '全部发送', 'callback_data': f'{msg_id}|ALL'}])
+
+    requests.post(f'{API_URL}/sendMessage', json={
+        'chat_id': chat_id,
+        'text': '请选择要发送的频道：',
+        'reply_markup': {'inline_keyboard': buttons}
+    })
+
 @app.route(f'/{BOT_TOKEN}', methods=['POST'])
 def webhook():
     data = request.get_json()
 
-    # 普通消息
     if 'message' in data:
         message = data['message']
         chat_id = message['chat']['id']
+
+        # 管理员命令处理
+        if chat_id == ADMIN_ID and 'text' in message:
+            text = message['text']
+
+            # /addchannel 命令
+            if text.startswith('/addchannel'):
+                parts = text.split()
+                if len(parts) == 2:
+                    channel_id_str = parts[1]
+                    try:
+                        channel_id = int(channel_id_str)
+                    except:
+                        send_text(chat_id, '频道ID格式错误，必须是数字。')
+                        return '', 200
+
+                    resp = requests.get(f'{API_URL}/getChat', params={'chat_id': channel_id})
+                    result = resp.json()
+                    if result.get('ok'):
+                        chat_info = result['result']
+                        name = chat_info.get('title', '未知频道')
+
+                        channels = load_channels()
+                        if any(c['id'] == channel_id for c in channels):
+                            send_text(chat_id, f'频道 {name} 已存在。')
+                            return '', 200
+
+                        channels.append({'id': channel_id, 'name': name})
+                        with open(CHANNEL_FILE, 'w', encoding='utf-8') as f:
+                            json.dump(channels, f, ensure_ascii=False, indent=2)
+
+                        send_text(chat_id, f'已添加频道：{name} ({channel_id})')
+                    else:
+                        send_text(chat_id, '获取频道信息失败，请确认机器人已加入频道且ID正确。')
+                else:
+                    send_text(chat_id, '使用方法：/addchannel <频道ID>')
+                return '', 200
 
         if chat_id != ADMIN_ID:
             return '', 200
@@ -83,7 +135,6 @@ def webhook():
         save_cache(cache)
         show_channel_buttons(chat_id, msg_id)
 
-    # 按钮回调
     elif 'callback_query' in data:
         cq = data['callback_query']
         chat_id = cq['message']['chat']['id']
@@ -91,7 +142,6 @@ def webhook():
 
         cache = load_cache()
         msg = cache.get(msg_id)
-
         if not msg:
             requests.post(f'{API_URL}/answerCallbackQuery', json={
                 'callback_query_id': cq['id'],
@@ -127,20 +177,6 @@ def webhook():
         })
 
     return '', 200
-
-# 显示频道按钮
-def show_channel_buttons(chat_id, msg_id):
-    channels = load_channels()
-    buttons = [
-        [{'text': c['name'], 'callback_data': f'{msg_id}|{c["id"]}'}] for c in channels
-    ]
-    buttons.append([{'text': '全部发送', 'callback_data': f'{msg_id}|ALL'}])
-
-    requests.post(f'{API_URL}/sendMessage', json={
-        'chat_id': chat_id,
-        'text': '请选择要发送的频道：',
-        'reply_markup': {'inline_keyboard': buttons}
-    })
 
 @app.route('/')
 def index():
