@@ -1,132 +1,105 @@
-import os
-import sqlite3
 from flask import Flask, request
+import sqlite3
 import requests
+import os
 
 app = Flask(__name__)
 
-BOT_TOKEN = "7660420861:AAEZDq7QVIva3aq4jEQpj-xhwdpRp7ceMdc"
+TOKEN = '7660420861:AAEZDq7QVIva3aq4jEQpj-xhwdpRp7ceMdc'
 ADMIN_ID = 5528758975
-DB_PATH = "/data/channels.db"
-API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
-
+BASE_URL = f'https://api.telegram.org/bot{TOKEN}'
+DB_PATH = 'channels.db'
 
 def init_db():
-    os.makedirs("/data", exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS channels (
-            channel_id TEXT PRIMARY KEY
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel_id TEXT NOT NULL
         )
     ''')
     conn.commit()
     conn.close()
 
-
-def get_channels():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT channel_id FROM channels')
-    rows = cursor.fetchall()
-    conn.close()
-    return [row[0] for row in rows]
-
-
 def add_channel(channel_id):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('INSERT OR IGNORE INTO channels (channel_id) VALUES (?)', (str(channel_id),))
+    cursor.execute('INSERT INTO channels (channel_id) VALUES (?)', (channel_id,))
     conn.commit()
     conn.close()
 
+def delete_channel(channel_id):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM channels WHERE channel_id=?', (channel_id,))
+    conn.commit()
+    conn.close()
 
-def send_message(chat_id, text, reply_markup=None):
-    payload = {
-        'chat_id': chat_id,
-        'text': text,
-        'parse_mode': 'HTML'
-    }
-    if reply_markup:
-        payload['reply_markup'] = reply_markup
-    requests.post(f"{API_URL}/sendMessage", json=payload)
+def get_channels():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute('SELECT channel_id FROM channels')
+        rows = cursor.fetchall()
+        return [row[0] for row in rows]
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        conn.close()
 
+def send_message(chat_id, text):
+    url = f'{BASE_URL}/sendMessage'
+    payload = {'chat_id': chat_id, 'text': text}
+    requests.post(url, json=payload)
+
+def forward_to_channels(text):
+    channels = get_channels()
+    for channel_id in channels:
+        send_message(channel_id, text)
 
 @app.route('/')
-def index():
-    return 'Bot is running.'
-
-
-@app.route(f"/{BOT_TOKEN}", methods=["POST"])
-def webhook():
-    update = request.get_json()
-    print("收到更新:", update)
-
-    if "message" in update:
-        msg = update["message"]
-        user_id = msg["from"]["id"]
-        message_id = msg["message_id"]
-        chat_id = msg["chat"]["id"]
-
-        if user_id != ADMIN_ID:
-            send_message(chat_id, "你不是管理员，无法使用此机器人。")
-            return "ok"
-
-        if "text" in msg:
-            text = msg["text"]
-            # 缓存消息，发送频道选择按钮
-            buttons = []
-            channels = get_channels()
-            if channels:
-                for c in channels:
-                    buttons.append([{
-                        "text": f"发送到 {c}",
-                        "callback_data": f"send|{c}|{text}"
-                    }])
-                buttons.append([{
-                    "text": "发送到所有频道",
-                    "callback_data": f"send|ALL|{text}"
-                }])
-                send_message(chat_id, "选择要发送的频道：", {"inline_keyboard": buttons})
-            else:
-                send_message(chat_id, "尚未记录任何频道，请先将机器人设为管理员再在频道发一条消息。")
-    elif "my_chat_member" in update:
-        status = update["my_chat_member"]["new_chat_member"]["status"]
-        chat = update["my_chat_member"]["chat"]
-        if chat["type"] == "channel" and status == "administrator":
-            add_channel(chat["id"])
-            print(f"添加频道: {chat['id']}")
-    elif "callback_query" in update:
-        callback = update["callback_query"]
-        data = callback["data"]
-        query_id = callback["id"]
-        user_id = callback["from"]["id"]
-        message_id = callback["message"]["message_id"]
-        chat_id = callback["message"]["chat"]["id"]
-
-        if user_id != ADMIN_ID:
-            return "ok"
-
-        if data.startswith("send|"):
-            _, channel_id, content = data.split("|", 2)
-            if channel_id == "ALL":
-                for c in get_channels():
-                    try:
-                        send_message(c, content)
-                    except Exception as e:
-                        print(f"发送到 {c} 失败: {e}")
-            else:
-                send_message(channel_id, content)
-
-            requests.post(f"{API_URL}/answerCallbackQuery", json={
-                "callback_query_id": query_id,
-                "text": "发送完成",
-                "show_alert": False
-            })
-
-    return "ok"
-
-
-if __name__ == "__main__":
+def home():
     init_db()
-    app.run(host="0.0.0.0", port=10000)
+    return 'Bot is running'
+
+@app.route(f'/{TOKEN}', methods=['POST'])
+def webhook():
+    init_db()
+    data = request.get_json()
+    print('收到更新:', data)
+
+    message = data.get('message')
+    if not message:
+        return 'ok'
+
+    chat_id = message['chat']['id']
+    text = message.get('text')
+
+    if not text:
+        return 'ok'
+
+    # 管理员命令处理
+    if chat_id == ADMIN_ID:
+        if text.startswith('/add '):
+            channel_id = text.split('/add ')[1]
+            add_channel(channel_id)
+            send_message(chat_id, f'已添加频道 {channel_id}')
+        elif text.startswith('/del '):
+            channel_id = text.split('/del ')[1]
+            delete_channel(channel_id)
+            send_message(chat_id, f'已删除频道 {channel_id}')
+        elif text.startswith('/list'):
+            channels = get_channels()
+            msg = '当前频道列表：\n' + '\n'.join(channels) if channels else '暂无频道'
+            send_message(chat_id, msg)
+        else:
+            forward_to_channels(text)
+            send_message(chat_id, '已转发')
+    else:
+        forward_to_channels(text)
+
+    return 'ok'
+
+# 部署在 Render 时，init_db() 需要在模块加载时执行
+init_db()
