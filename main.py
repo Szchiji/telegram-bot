@@ -24,12 +24,25 @@ def init_db():
 
 init_db()
 
-def add_channel(chat_id, title):
+def add_channel(chat_id, chat_name):
     conn = sqlite3.connect('channels.db')
     c = conn.cursor()
-    c.execute('INSERT OR REPLACE INTO channels (id, name, enabled) VALUES (?, ?, 1)', (chat_id, title))
+    # 如果频道已存在，只更新名称
+    c.execute('SELECT id FROM channels WHERE id=?', (chat_id,))
+    if c.fetchone():
+        c.execute('UPDATE channels SET name=? WHERE id=?', (chat_name, chat_id))
+    else:
+        c.execute('INSERT INTO channels (id, name) VALUES (?, ?)', (chat_id, chat_name))
     conn.commit()
     conn.close()
+
+def get_enabled_channels():
+    conn = sqlite3.connect('channels.db')
+    c = conn.cursor()
+    c.execute('SELECT id FROM channels WHERE enabled=1')
+    res = [row[0] for row in c.fetchall()]
+    conn.close()
+    return res
 
 def disable_channel(chat_id):
     conn = sqlite3.connect('channels.db')
@@ -44,14 +57,6 @@ def enable_channel(chat_id):
     c.execute('UPDATE channels SET enabled=1 WHERE id=?', (chat_id,))
     conn.commit()
     conn.close()
-
-def get_enabled_channels():
-    conn = sqlite3.connect('channels.db')
-    c = conn.cursor()
-    c.execute('SELECT id FROM channels WHERE enabled=1')
-    res = [row[0] for row in c.fetchall()]
-    conn.close()
-    return res
 
 def get_all_channels():
     conn = sqlite3.connect('channels.db')
@@ -69,12 +74,14 @@ def index():
 def webhook():
     update = telegram.Update.de_json(request.get_json(force=True), bot)
 
+    # 监听机器人状态变化事件，自动记录频道
     if update.my_chat_member:
         chat = update.my_chat_member.chat
         new_status = update.my_chat_member.new_chat_member.status
         if chat.type == 'channel' and new_status in ['administrator', 'member']:
             add_channel(chat.id, chat.title or '')
 
+    # 处理管理员命令
     if update.message:
         msg = update.message
         if msg.chat.type == 'private' and msg.from_user.id == ADMIN_ID:
@@ -113,6 +120,17 @@ def webhook():
                     bot.send_message(ADMIN_ID, f'频道 {cid} 已恢复启用。')
                 except:
                     bot.send_message(ADMIN_ID, '命令格式错误，示例：/enable_channel 频道ID')
+
+            elif text == '/help':
+                help_text = (
+                    "机器人管理员命令说明：\n"
+                    "/broadcast 内容 - 广播消息到所有启用频道\n"
+                    "/channels - 查看已记录频道及状态\n"
+                    "/disable_channel 频道ID - 禁用某频道\n"
+                    "/enable_channel 频道ID - 启用某频道\n"
+                    "/help - 显示本帮助信息"
+                )
+                bot.send_message(ADMIN_ID, help_text)
 
     return 'ok'
 
