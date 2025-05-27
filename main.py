@@ -1,92 +1,106 @@
 from flask import Flask, request
 import telegram
-import json
+import sqlite3
 import os
 
-app = Flask(__name__)
-
+# === 配置 ===
 BOT_TOKEN = '7660420861:AAEZDq7QVIva3aq4jEQpj-xhwdpRp7ceMdc'
 ADMIN_ID = 5528758975
-bot = telegram.Bot(token=BOT_TOKEN)
+WEBHOOK_URL = 'https://telegram-bot-329q.onrender.com'
+bot = telegram.Bot(BOT_TOKEN)
 
-CHANNEL_FILE = 'channels.json'
+# === Flask App ===
+app = Flask(__name__)
 
-if not os.path.exists(CHANNEL_FILE):
-    with open(CHANNEL_FILE, 'w') as f:
-        json.dump({}, f)
+# === 初始化数据库 ===
+def init_db():
+    conn = sqlite3.connect('channels.db')
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS channels (
+            id INTEGER PRIMARY KEY,
+            enabled INTEGER DEFAULT 1
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
-def load_channels():
-    with open(CHANNEL_FILE, 'r') as f:
-        return json.load(f)
+init_db()
 
-def save_channels(data):
-    with open(CHANNEL_FILE, 'w') as f:
-        json.dump(data, f)
+# === 添加频道记录 ===
+def add_channel(chat_id):
+    conn = sqlite3.connect('channels.db')
+    c = conn.cursor()
+    c.execute('INSERT OR IGNORE INTO channels (id) VALUES (?)', (chat_id,))
+    conn.commit()
+    conn.close()
 
-@app.route(f'/{BOT_TOKEN}', methods=['POST'])
-def webhook():
+# === 获取启用频道 ===
+def get_enabled_channels():
+    conn = sqlite3.connect('channels.db')
+    c = conn.cursor()
+    c.execute('SELECT id FROM channels WHERE enabled = 1')
+    results = [row[0] for row in c.fetchall()]
+    conn.close()
+    return results
+
+# === 禁用频道 ===
+def disable_channel(chat_id):
+    conn = sqlite3.connect('channels.db')
+    c = conn.cursor()
+    c.execute('UPDATE channels SET enabled = 0 WHERE id = ?', (chat_id,))
+    conn.commit()
+    conn.close()
+
+# === 获取所有频道 ===
+def get_all_channels():
+    conn = sqlite3.connect('channels.db')
+    c = conn.cursor()
+    c.execute('SELECT id, enabled FROM channels')
+    results = c.fetchall()
+    conn.close()
+    return results
+
+# === 设置 Webhook ===
+@app.route('/setwebhook', methods=['GET'])
+def set_webhook():
+    success = bot.set_webhook(f'{WEBHOOK_URL}')
+    return 'Webhook set!' if success else 'Failed to set webhook.'
+
+# === 处理 Telegram 更新 ===
+@app.route('/', methods=['POST'])
+def handle_update():
     update = telegram.Update.de_json(request.get_json(force=True), bot)
 
-    # ✅ 自动记录加入的频道（通过 my_chat_member）
-    if update.my_chat_member:
-        chat = update.my_chat_member.chat
-        new_status = update.my_chat_member.new_chat_member.status
-        if chat.type == 'channel' and new_status in ['administrator', 'member']:
-            channels = load_channels()
-            if str(chat.id) not in channels:
-                channels[str(chat.id)] = {'title': chat.title or "无名频道", 'enabled': True}
-                save_channels(channels)
+    if update.message:
+        msg = update.message
 
-    # ✅ 管理员命令
-    elif update.message and update.message.from_user.id == ADMIN_ID:
-        text = update.message.text or ""
-        args = text.split(maxsplit=1)
-        cmd = args[0]
+        # 被添加为频道管理员时记录频道 ID
+        if msg.chat.type in ['channel']:
+            add_channel(msg.chat.id)
 
-        if cmd == '/broadcast':
-            if len(args) < 2:
-                bot.send_message(chat_id=ADMIN_ID, text='请输入要广播的消息内容。')
-                return 'ok'
-            message = args[1]
-            channels = load_channels()
-            count = 0
-            for cid, info in channels.items():
-                if info.get('enabled', True):
+        # 管理员命令：广播消息
+        if msg.chat.type == 'private' and msg.from_user.id == ADMIN_ID:
+            if msg.text.startswith('/broadcast '):
+                content = msg.text.replace('/broadcast ', '', 1)
+                for channel_id in get_enabled_channels():
                     try:
-                        bot.send_message(chat_id=int(cid), text=message)
-                        count += 1
+                        bot.send_message(chat_id=channel_id, text=content)
                     except Exception as e:
-                        print(f"发送失败: {cid} - {e}")
-            bot.send_message(chat_id=ADMIN_ID, text=f'广播完成，成功发送到 {count} 个频道。')
+                        print(f'Failed to send to {channel_id}: {e}')
+                bot.send_message(chat_id=ADMIN_ID, text="广播完成。")
 
-        elif cmd == '/list_channels':
-            channels = load_channels()
-            if not channels:
-                bot.send_message(chat_id=ADMIN_ID, text='尚未记录任何频道。')
-            else:
-                lines = []
-                for cid, info in channels.items():
-                    lines.append(f"{info.get('title', '无名')} ({cid}) - {'✅启用' if info.get('enabled', True) else '❌禁用'}")
-                bot.send_message(chat_id=ADMIN_ID, text='\n'.join(lines))
+            elif msg.text.startswith('/channels'):
+                data = get_all_channels()
+                text = '\n'.join([f'{cid} {"✅" if enabled else "❌"}' for cid, enabled in data]) or "无记录频道"
+                bot.send_message(chat_id=ADMIN_ID, text=text)
 
-        elif cmd == '/disable_channel':
-            if len(args) < 2:
-                bot.send_message(chat_id=ADMIN_ID, text='用法：/disable_channel 频道ID')
-            else:
-                cid = args[1].strip()
-                channels = load_channels()
-                if cid in channels:
-                    channels[cid]['enabled'] = False
-                    save_channels(channels)
-                    bot.send_message(chat_id=ADMIN_ID, text=f"频道 {cid} 已被禁用。")
-                else:
-                    bot.send_message(chat_id=ADMIN_ID, text="未找到该频道。")
+            elif msg.text.startswith('/disable_channel '):
+                try:
+                    cid = int(msg.text.split(' ')[1])
+                    disable_channel(cid)
+                    bot.send_message(chat_id=ADMIN_ID, text=f"频道 {cid} 已禁用。")
+                except:
+                    bot.send_message(chat_id=ADMIN_ID, text="格式错误。用法：/disable_channel 频道ID")
 
     return 'ok'
-
-@app.route('/')
-def home():
-    return 'Bot is running.'
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
