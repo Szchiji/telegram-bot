@@ -1,18 +1,15 @@
 from flask import Flask, request
 import telegram
 import sqlite3
-import os
 
-# === 配置 ===
 BOT_TOKEN = '7660420861:AAEZDq7QVIva3aq4jEQpj-xhwdpRp7ceMdc'
 ADMIN_ID = 5528758975
-WEBHOOK_URL = 'https://telegram-bot-329q.onrender.com'
-bot = telegram.Bot(BOT_TOKEN)
+WEBHOOK_URL = f'https://telegram-bot-329q.onrender.com/{BOT_TOKEN}'
 
-# === Flask App ===
+bot = telegram.Bot(token=BOT_TOKEN)
 app = Flask(__name__)
 
-# === 初始化数据库 ===
+# 数据库初始化
 def init_db():
     conn = sqlite3.connect('channels.db')
     c = conn.cursor()
@@ -27,7 +24,6 @@ def init_db():
 
 init_db()
 
-# === 添加频道记录 ===
 def add_channel(chat_id):
     conn = sqlite3.connect('channels.db')
     c = conn.cursor()
@@ -35,72 +31,76 @@ def add_channel(chat_id):
     conn.commit()
     conn.close()
 
-# === 获取启用频道 ===
 def get_enabled_channels():
     conn = sqlite3.connect('channels.db')
     c = conn.cursor()
-    c.execute('SELECT id FROM channels WHERE enabled = 1')
-    results = [row[0] for row in c.fetchall()]
+    c.execute('SELECT id FROM channels WHERE enabled=1')
+    channels = [row[0] for row in c.fetchall()]
     conn.close()
-    return results
+    return channels
 
-# === 禁用频道 ===
 def disable_channel(chat_id):
     conn = sqlite3.connect('channels.db')
     c = conn.cursor()
-    c.execute('UPDATE channels SET enabled = 0 WHERE id = ?', (chat_id,))
+    c.execute('UPDATE channels SET enabled=0 WHERE id=?', (chat_id,))
     conn.commit()
     conn.close()
 
-# === 获取所有频道 ===
 def get_all_channels():
     conn = sqlite3.connect('channels.db')
     c = conn.cursor()
     c.execute('SELECT id, enabled FROM channels')
-    results = c.fetchall()
+    rows = c.fetchall()
     conn.close()
-    return results
+    return rows
 
-# === 设置 Webhook ===
-@app.route('/setwebhook', methods=['GET'])
-def set_webhook():
-    success = bot.set_webhook(f'{WEBHOOK_URL}')
-    return 'Webhook set!' if success else 'Failed to set webhook.'
+@app.route('/')
+def index():
+    return 'Bot is running'
 
-# === 处理 Telegram 更新 ===
-@app.route('/', methods=['POST'])
-def handle_update():
+@app.route(f'/{BOT_TOKEN}', methods=['POST'])
+def webhook():
     update = telegram.Update.de_json(request.get_json(force=True), bot)
 
     if update.message:
         msg = update.message
 
-        # 被添加为频道管理员时记录频道 ID
-        if msg.chat.type in ['channel']:
+        # 如果是频道消息且机器人为管理员，记录频道id
+        if msg.chat.type == 'channel':
             add_channel(msg.chat.id)
 
-        # 管理员命令：广播消息
+        # 管理员私聊指令处理
         if msg.chat.type == 'private' and msg.from_user.id == ADMIN_ID:
-            if msg.text.startswith('/broadcast '):
-                content = msg.text.replace('/broadcast ', '', 1)
-                for channel_id in get_enabled_channels():
+            if msg.text:
+                if msg.text.startswith('/broadcast '):
+                    text = msg.text[len('/broadcast '):]
+                    for cid in get_enabled_channels():
+                        try:
+                            bot.send_message(cid, text)
+                        except Exception as e:
+                            print(f"发送到频道 {cid} 失败：{e}")
+                    bot.send_message(ADMIN_ID, '广播完成。')
+
+                elif msg.text.startswith('/channels'):
+                    channels = get_all_channels()
+                    text = '\n'.join([f'{cid} {"✅" if enabled else "❌"}' for cid, enabled in channels]) or '无记录频道'
+                    bot.send_message(ADMIN_ID, text)
+
+                elif msg.text.startswith('/disable_channel '):
                     try:
-                        bot.send_message(chat_id=channel_id, text=content)
-                    except Exception as e:
-                        print(f'Failed to send to {channel_id}: {e}')
-                bot.send_message(chat_id=ADMIN_ID, text="广播完成。")
-
-            elif msg.text.startswith('/channels'):
-                data = get_all_channels()
-                text = '\n'.join([f'{cid} {"✅" if enabled else "❌"}' for cid, enabled in data]) or "无记录频道"
-                bot.send_message(chat_id=ADMIN_ID, text=text)
-
-            elif msg.text.startswith('/disable_channel '):
-                try:
-                    cid = int(msg.text.split(' ')[1])
-                    disable_channel(cid)
-                    bot.send_message(chat_id=ADMIN_ID, text=f"频道 {cid} 已禁用。")
-                except:
-                    bot.send_message(chat_id=ADMIN_ID, text="格式错误。用法：/disable_channel 频道ID")
+                        cid = int(msg.text.split(' ')[1])
+                        disable_channel(cid)
+                        bot.send_message(ADMIN_ID, f'频道 {cid} 已禁用。')
+                    except:
+                        bot.send_message(ADMIN_ID, '格式错误，用法：/disable_channel 频道ID')
 
     return 'ok'
+
+@app.route('/setwebhook')
+def set_webhook():
+    success = bot.set_webhook(WEBHOOK_URL)
+    return 'Webhook set!' if success else 'Failed to set webhook.'
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+
