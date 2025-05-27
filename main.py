@@ -27,13 +27,17 @@ def save_channels(data):
 def webhook():
     update = telegram.Update.de_json(request.get_json(force=True), bot)
 
-    if update.channel_post:
-        chat = update.channel_post.chat
-        channels = load_channels()
-        if str(chat.id) not in channels:
-            channels[str(chat.id)] = {'title': chat.title, 'enabled': True}
-            save_channels(channels)
+    # ✅ 自动记录加入的频道（通过 my_chat_member）
+    if update.my_chat_member:
+        chat = update.my_chat_member.chat
+        new_status = update.my_chat_member.new_chat_member.status
+        if chat.type == 'channel' and new_status in ['administrator', 'member']:
+            channels = load_channels()
+            if str(chat.id) not in channels:
+                channels[str(chat.id)] = {'title': chat.title or "无名频道", 'enabled': True}
+                save_channels(channels)
 
+    # ✅ 管理员命令
     elif update.message and update.message.from_user.id == ADMIN_ID:
         text = update.message.text or ""
         args = text.split(maxsplit=1)
