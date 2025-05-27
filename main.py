@@ -59,13 +59,15 @@ def index():
 
 @app.route(f'/{BOT_TOKEN}', methods=['POST'])
 def webhook():
-    update = telegram.Update.de_json(request.get_json(force=True), bot)
+    data = request.get_json(force=True)
+    print('收到更新:', data)
+    update = telegram.Update.de_json(data, bot)
 
     # 监听机器人状态变化事件，自动记录频道
     if update.my_chat_member:
         chat = update.my_chat_member.chat
         new_status = update.my_chat_member.new_chat_member.status
-        # 频道，且机器人被加入为管理员或成员（多种可能）
+        # 频道，且机器人被加入为管理员或成员
         if chat.type == 'channel' and new_status in ['administrator', 'member']:
             add_channel(chat.id)
 
@@ -107,6 +109,11 @@ def webhook():
 def set_webhook():
     success = bot.set_webhook(WEBHOOK_URL, allowed_updates=["message", "my_chat_member"])
     return 'Webhook 设置成功!' if success else 'Webhook 设置失败!'
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
