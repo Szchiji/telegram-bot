@@ -1,7 +1,7 @@
 from flask import Flask, request
+import telegram
 import json
 import os
-import telegram
 
 app = Flask(__name__)
 
@@ -11,17 +11,14 @@ bot = telegram.Bot(token=BOT_TOKEN)
 
 CHANNEL_FILE = 'channels.json'
 
-# 初始化频道数据文件
 if not os.path.exists(CHANNEL_FILE):
     with open(CHANNEL_FILE, 'w') as f:
         json.dump({}, f)
 
-# 加载频道数据
 def load_channels():
     with open(CHANNEL_FILE, 'r') as f:
         return json.load(f)
 
-# 保存频道数据
 def save_channels(data):
     with open(CHANNEL_FILE, 'w') as f:
         json.dump(data, f)
@@ -31,7 +28,6 @@ def webhook():
     update = telegram.Update.de_json(request.get_json(force=True), bot)
 
     if update.channel_post:
-        # 当机器人在频道中收到消息时记录频道信息
         chat = update.channel_post.chat
         channels = load_channels()
         if str(chat.id) not in channels:
